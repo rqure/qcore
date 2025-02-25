@@ -18,7 +18,6 @@ type KeycloakInteractor interface {
 
 type keycloakInteractor struct {
 	client      *gocloak.GoCloak
-	ctx         context.Context
 	adminToken  *gocloak.JWT
 	realmConfig *RealmConfig
 }
@@ -30,34 +29,33 @@ type RealmConfig struct {
 	MasterRealm   string
 }
 
-func NewKeycloakInteractor(config *RealmConfig) (KeycloakInteractor, error) {
+func NewKeycloakInteractor(ctx context.Context, config *RealmConfig) (KeycloakInteractor, error) {
 	ki := &keycloakInteractor{
 		client:      gocloak.NewClient(config.BaseURL),
-		ctx:         context.Background(),
 		realmConfig: config,
 	}
 
-	if err := ki.authenticate(); err != nil {
+	if err := ki.authenticate(ctx); err != nil {
 		return nil, fmt.Errorf("authentication failed: %v", err)
 	}
 
-	if err := ki.ensureRealmExists(); err != nil {
+	if err := ki.ensureRealmExists(ctx); err != nil {
 		return nil, fmt.Errorf("realm setup failed: %v", err)
 	}
 
-	if err := ki.ensureClientExists(); err != nil {
+	if err := ki.ensureClientExists(ctx); err != nil {
 		return nil, fmt.Errorf("client setup failed: %v", err)
 	}
 
-	if err := ki.ensureRolesExist(); err != nil {
+	if err := ki.ensureRolesExist(ctx); err != nil {
 		return nil, fmt.Errorf("roles setup failed: %v", err)
 	}
 
 	return ki, nil
 }
 
-func (ki *keycloakInteractor) authenticate() error {
-	token, err := ki.client.LoginAdmin(ki.ctx, ki.realmConfig.AdminUsername, ki.realmConfig.AdminPassword, ki.realmConfig.MasterRealm)
+func (ki *keycloakInteractor) authenticate(ctx context.Context) error {
+	token, err := ki.client.LoginAdmin(ctx, ki.realmConfig.AdminUsername, ki.realmConfig.AdminPassword, ki.realmConfig.MasterRealm)
 	if err != nil {
 		return err
 	}
@@ -65,15 +63,15 @@ func (ki *keycloakInteractor) authenticate() error {
 	return nil
 }
 
-func (ki *keycloakInteractor) ensureRealmExists() error {
-	_, err := ki.client.GetRealm(ki.ctx, ki.adminToken.AccessToken, realmName)
+func (ki *keycloakInteractor) ensureRealmExists(ctx context.Context) error {
+	_, err := ki.client.GetRealm(ctx, ki.adminToken.AccessToken, realmName)
 	if err != nil {
 		// Create realm if it doesn't exist
 		realm := &gocloak.RealmRepresentation{
 			Realm:   gocloak.StringP(realmName),
 			Enabled: gocloak.BoolP(true),
 		}
-		_, err = ki.client.CreateRealm(ki.ctx, ki.adminToken.AccessToken, *realm)
+		_, err = ki.client.CreateRealm(ctx, ki.adminToken.AccessToken, *realm)
 		if err != nil {
 			return err
 		}
@@ -81,8 +79,8 @@ func (ki *keycloakInteractor) ensureRealmExists() error {
 	return nil
 }
 
-func (ki *keycloakInteractor) ensureClientExists() error {
-	clients, err := ki.client.GetClients(ki.ctx, ki.adminToken.AccessToken, realmName, gocloak.GetClientsParams{
+func (ki *keycloakInteractor) ensureClientExists(ctx context.Context) error {
+	clients, err := ki.client.GetClients(ctx, ki.adminToken.AccessToken, realmName, gocloak.GetClientsParams{
 		ClientID: gocloak.StringP(clientName),
 	})
 	if err != nil || len(clients) == 0 {
@@ -92,7 +90,7 @@ func (ki *keycloakInteractor) ensureClientExists() error {
 			StandardFlowEnabled:       gocloak.BoolP(true),
 			DirectAccessGrantsEnabled: gocloak.BoolP(true),
 		}
-		_, err = ki.client.CreateClient(ki.ctx, ki.adminToken.AccessToken, realmName, *client)
+		_, err = ki.client.CreateClient(ctx, ki.adminToken.AccessToken, realmName, *client)
 		if err != nil {
 			return err
 		}
@@ -100,13 +98,13 @@ func (ki *keycloakInteractor) ensureClientExists() error {
 	return nil
 }
 
-func (ki *keycloakInteractor) ensureRolesExist() error {
-	role, err := ki.client.GetRealmRole(ki.ctx, ki.adminToken.AccessToken, realmName, defaultAdminRole)
+func (ki *keycloakInteractor) ensureRolesExist(ctx context.Context) error {
+	role, err := ki.client.GetRealmRole(ctx, ki.adminToken.AccessToken, realmName, defaultAdminRole)
 	if err != nil || role == nil {
 		role := &gocloak.Role{
 			Name: gocloak.StringP(defaultAdminRole),
 		}
-		_, err = ki.client.CreateRealmRole(ki.ctx, ki.adminToken.AccessToken, realmName, *role)
+		_, err = ki.client.CreateRealmRole(ctx, ki.adminToken.AccessToken, realmName, *role)
 		if err != nil {
 			return err
 		}
