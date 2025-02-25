@@ -38,7 +38,7 @@ type notificationManager struct {
 	registeredNotifications map[string]map[string]NotificationLease
 }
 
-func NewNotificationManager(core qnats.Core) data.ModifiableNotificationPublisher {
+func NewNotificationManager(core qnats.Core) NotificationManager {
 	return &notificationManager{
 		core:                    core,
 		registeredNotifications: make(map[string]map[string]NotificationLease),
