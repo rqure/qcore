@@ -27,12 +27,15 @@ type writeWorker struct {
 	natsCore         qnats.Core
 	isStoreConnected bool
 	modeManager      ModeManager
-	handle           app.Handle
+
+	handle app.Handle
 }
 
-func NewWriteWorker(store data.Store) WriteWorker {
+func NewWriteWorker(store data.Store, natsCore qnats.Core, modeManager ModeManager) WriteWorker {
 	return &writeWorker{
-		store: store,
+		store:       store,
+		natsCore:    natsCore,
+		modeManager: modeManager,
 	}
 }
 
@@ -47,11 +50,12 @@ func (w *writeWorker) OnStoreDisconnected() {
 }
 
 func (w *writeWorker) Init(ctx context.Context, handle app.Handle) {
+	w.handle = handle
+
 	if !w.modeManager.HasModes(ModeWrite) {
 		return
 	}
 
-	w.handle = handle
 	w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetWriteSubject(), w.handleWriteRequest)
 }
 

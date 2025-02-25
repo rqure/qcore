@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/app"
 	"github.com/rqure/qlib/pkg/data"
+	"github.com/rqure/qlib/pkg/data/notification"
 	qnats "github.com/rqure/qlib/pkg/data/store/nats"
 	"github.com/rqure/qlib/pkg/log"
 	"github.com/rqure/qlib/pkg/protobufs"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -24,19 +25,22 @@ type notificationWorker struct {
 	natsCore         qnats.Core
 	isStoreConnected bool
 	modeManager      ModeManager
-	notificationMgr  *notificationManager
+	notifManager     NotificationManager
+	handle           app.Handle
 }
 
-func NewNotificationWorker(store data.Store, natsCore qnats.Core, modeManager ModeManager) NotificationWorker {
+func NewNotificationWorker(store data.Store, natsCore qnats.Core, modeManager ModeManager, notifManager NotificationManager) NotificationWorker {
 	return &notificationWorker{
-		store:           store,
-		natsCore:        natsCore,
-		modeManager:     modeManager,
-		notificationMgr: NewNotificationManager(store),
+		store:        store,
+		natsCore:     natsCore,
+		modeManager:  modeManager,
+		notifManager: notifManager,
 	}
 }
 
 func (w *notificationWorker) Init(ctx context.Context, handle app.Handle) {
+	w.handle = handle
+
 	if !w.modeManager.HasModes(ModeWrite) {
 		return
 	}
@@ -45,7 +49,9 @@ func (w *notificationWorker) Init(ctx context.Context, handle app.Handle) {
 }
 
 func (w *notificationWorker) Deinit(context.Context) {}
-func (w *notificationWorker) DoWork(context.Context) {}
+func (w *notificationWorker) DoWork(context.Context) {
+	w.notifManager.ClearExpired()
+}
 
 func (w *notificationWorker) OnStoreConnected(ctx context.Context) {
 	w.isStoreConnected = true
@@ -87,8 +93,9 @@ func (w *notificationWorker) handleRegisterNotification(ctx context.Context, msg
 	}
 
 	for _, cfg := range req.Requests {
-		token := w.notificationMgr.RegisterNotification(ctx, cfg)
-		rsp.Tokens = append(rsp.Tokens, token)
+		cfg := notification.FromConfigPb(cfg)
+		w.notifManager.Register(cfg)
+		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
 	}
 
 	w.sendResponse(msg, rsp)
@@ -112,7 +119,7 @@ func (w *notificationWorker) handleUnregisterNotification(ctx context.Context, m
 	}
 
 	for _, token := range req.Tokens {
-		w.notificationMgr.UnregisterNotification(ctx, token)
+		w.notifManager.Unregister(notification.FromToken(token))
 	}
 
 	rsp.Status = protobufs.ApiRuntimeUnregisterNotificationResponse_SUCCESS

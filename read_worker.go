@@ -39,11 +39,11 @@ func NewReadWorker(store data.Store, natsCore qnats.Core, modeManager ModeManage
 }
 
 func (w *readWorker) Init(ctx context.Context, handle app.Handle) {
+	w.handle = handle
+
 	if !w.modeManager.HasModes(ModeRead) {
 		return
 	}
-
-	w.handle = handle
 
 	w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetReadSubject(), w.handleReadRequest)
 }

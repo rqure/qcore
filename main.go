@@ -38,12 +38,13 @@ func getWebServiceAddress() string {
 
 func main() {
 	natsCore := nats.NewCore(nats.Config{Address: getNatsAddress()})
+	notificationManager := NewNotificationManager(natsCore)
 
 	s := store.New(
 		store.PersistOverPostgres(getPostgresAddress()),
 		func(store *store.Store) {
 			store.ModifiableNotificationConsumer = nats.NewNotificationConsumer(natsCore)
-			store.ModifiableNotificationPublisher = nats.NewNotificationPublisher(natsCore)
+			store.ModifiableNotificationPublisher = notificationManager
 		},
 	)
 
@@ -52,7 +53,7 @@ func main() {
 
 	readWorker := NewReadWorker(s, natsCore, modeManager)
 	writeWorker := NewWriteWorker(s, natsCore, modeManager)
-	notificationWorker := NewNotificationWorker(s, natsCore, modeManager)
+	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
 
 	// Connect store signals
 	storeWorker.Connected.Connect(readWorker.OnStoreConnected)
