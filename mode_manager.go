@@ -8,7 +8,12 @@ import (
 type Mode string
 
 const (
-	ModeRead  Mode = "reader"
+	// Reader mode is the scalable mode. In this mode, the application will respond to read requests.
+	// Multiple readers can be added to the cluster to scale the read capacity.
+	ModeRead Mode = "reader"
+
+	// Writer mode is the consistent mode. In this mode, the application will respond to write requests.
+	// Only one writer can be added to the cluster to ensure consistency.
 	ModeWrite Mode = "writer"
 )
 

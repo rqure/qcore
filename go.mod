@@ -1,4 +1,4 @@
-module github.com/rqure/qstore
+module github.com/rqure/qcore
 
 go 1.22.7
 
