@@ -27,15 +27,6 @@ func getNatsAddress() string {
 	return addr
 }
 
-func getWebServiceAddress() string {
-	addr := os.Getenv("Q_WEB_ADDR")
-	if addr == "" {
-		addr = "0.0.0.0:20000"
-	}
-
-	return addr
-}
-
 func main() {
 	natsCore := nats.NewCore(nats.Config{Address: getNatsAddress()})
 	notificationManager := NewNotificationManager(natsCore)

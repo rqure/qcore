@@ -99,7 +99,7 @@ func (w *notificationWorker) handleRegisterNotification(_ context.Context, msg *
 	w.sendResponse(msg, rsp)
 }
 
-func (w *notificationWorker) handleUnregisterNotification(ctx context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
+func (w *notificationWorker) handleUnregisterNotification(_ context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
 	req := new(protobufs.ApiRuntimeUnregisterNotificationRequest)
 	rsp := new(protobufs.ApiRuntimeUnregisterNotificationResponse)
 
