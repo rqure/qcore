@@ -43,6 +43,10 @@ func (w *writeWorker) Deinit(context.Context) {}
 func (w *writeWorker) DoWork(context.Context) {}
 func (w *writeWorker) OnStoreConnected(ctx context.Context) {
 	w.isStoreConnected = true
+
+	if w.modeManager.HasModes(ModeWrite) {
+		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetWriteSubject(), w.handleWriteRequest)
+	}
 }
 
 func (w *writeWorker) OnStoreDisconnected() {
@@ -51,12 +55,6 @@ func (w *writeWorker) OnStoreDisconnected() {
 
 func (w *writeWorker) Init(ctx context.Context, handle app.Handle) {
 	w.handle = handle
-
-	if !w.modeManager.HasModes(ModeWrite) {
-		return
-	}
-
-	w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetWriteSubject(), w.handleWriteRequest)
 }
 
 func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {

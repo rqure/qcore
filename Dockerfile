@@ -7,7 +7,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY *.go ./
-COPY web/ ./web/
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /qapp
 
@@ -17,7 +16,6 @@ FROM gcr.io/distroless/base-debian11 AS build-release-stage
 WORKDIR /
 
 COPY --from=build-stage /qapp /qapp
-COPY --from=build-stage /app/web/ /web/
 
 USER nonroot:nonroot
 

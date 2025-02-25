@@ -40,12 +40,6 @@ func NewReadWorker(store data.Store, natsCore qnats.Core, modeManager ModeManage
 
 func (w *readWorker) Init(ctx context.Context, handle app.Handle) {
 	w.handle = handle
-
-	if !w.modeManager.HasModes(ModeRead) {
-		return
-	}
-
-	w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetReadSubject(), w.handleReadRequest)
 }
 
 func (w *readWorker) Deinit(context.Context) {}
@@ -227,7 +221,7 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 	w.sendResponse(msg, rsp)
 }
 
-func (w *readWorker) handleGetDatabaseConnectionStatus(ctx context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
+func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
 	req := new(protobufs.ApiRuntimeGetDatabaseConnectionStatusRequest)
 	rsp := new(protobufs.ApiRuntimeGetDatabaseConnectionStatusResponse)
 
@@ -303,6 +297,10 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 
 func (w *readWorker) OnStoreConnected(context.Context) {
 	w.isStoreConnected = true
+
+	if w.modeManager.HasModes(ModeRead) {
+		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetReadSubject(), w.handleReadRequest)
+	}
 }
 
 func (w *readWorker) OnStoreDisconnected() {

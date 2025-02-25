@@ -40,12 +40,6 @@ func NewNotificationWorker(store data.Store, natsCore qnats.Core, modeManager Mo
 
 func (w *notificationWorker) Init(ctx context.Context, handle app.Handle) {
 	w.handle = handle
-
-	if !w.modeManager.HasModes(ModeWrite) {
-		return
-	}
-
-	w.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationSubject(), w.handleNotificationRequest)
 }
 
 func (w *notificationWorker) Deinit(context.Context) {}
@@ -55,6 +49,10 @@ func (w *notificationWorker) DoWork(context.Context) {
 
 func (w *notificationWorker) OnStoreConnected(ctx context.Context) {
 	w.isStoreConnected = true
+
+	if w.modeManager.HasModes(ModeWrite) {
+		w.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationSubject(), w.handleNotificationRequest)
+	}
 }
 func (w *notificationWorker) OnStoreDisconnected() {
 	w.isStoreConnected = false
@@ -76,7 +74,7 @@ func (w *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
 	})
 }
 
-func (w *notificationWorker) handleRegisterNotification(ctx context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
+func (w *notificationWorker) handleRegisterNotification(_ context.Context, msg *nats.Msg, apiMsg *protobufs.ApiMessage) {
 	req := new(protobufs.ApiRuntimeRegisterNotificationRequest)
 	rsp := new(protobufs.ApiRuntimeRegisterNotificationResponse)
 
