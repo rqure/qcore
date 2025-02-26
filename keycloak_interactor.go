@@ -14,6 +14,14 @@ const (
 )
 
 type KeycloakInteractor interface {
+	// Client session management
+	CreateClientSession(ctx context.Context, clientID, clientSecret string) (*gocloak.JWT, error)
+	ValidateClientSession(ctx context.Context, accessToken string) (*gocloak.IntroSpectTokenResult, error)
+
+	// User session management
+	CreateUserSession(ctx context.Context, username, password string) (*gocloak.JWT, error)
+	ValidateUserSession(ctx context.Context, accessToken string) (*gocloak.IntroSpectTokenResult, error)
+	RefreshUserSession(ctx context.Context, refreshToken string) (*gocloak.JWT, error)
 }
 
 type keycloakInteractor struct {
@@ -110,4 +118,60 @@ func (ki *keycloakInteractor) ensureRolesExist(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (ki *keycloakInteractor) CreateClientSession(ctx context.Context, clientID, clientSecret string) (*gocloak.JWT, error) {
+	token, err := ki.client.GetToken(ctx, realmName, gocloak.TokenOptions{
+		ClientID:     &clientID,
+		ClientSecret: &clientSecret,
+		GrantType:    gocloak.StringP("client_credentials"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client session: %v", err)
+	}
+	return token, nil
+}
+
+func (ki *keycloakInteractor) ValidateClientSession(ctx context.Context, accessToken string) (*gocloak.IntroSpectTokenResult, error) {
+	result, err := ki.client.RetrospectToken(ctx, accessToken, clientName, "", realmName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate client session: %v", err)
+	}
+	if !*result.Active {
+		return nil, fmt.Errorf("token is not active")
+	}
+	return result, nil
+}
+
+func (ki *keycloakInteractor) CreateUserSession(ctx context.Context, username, password string) (*gocloak.JWT, error) {
+	token, err := ki.client.Login(ctx,
+		clientName,
+		"",
+		realmName,
+		username,
+		password,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user session: %v", err)
+	}
+	return token, nil
+}
+
+func (ki *keycloakInteractor) ValidateUserSession(ctx context.Context, accessToken string) (*gocloak.IntroSpectTokenResult, error) {
+	result, err := ki.client.RetrospectToken(ctx, accessToken, clientName, "", realmName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate user session: %v", err)
+	}
+	if !*result.Active {
+		return nil, fmt.Errorf("token is not active")
+	}
+	return result, nil
+}
+
+func (ki *keycloakInteractor) RefreshUserSession(ctx context.Context, refreshToken string) (*gocloak.JWT, error) {
+	token, err := ki.client.RefreshToken(ctx, refreshToken, clientName, "", realmName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh user session: %v", err)
+	}
+	return token, nil
 }
