@@ -35,6 +35,7 @@ func main() {
 		store.PersistOverPostgres(getPostgresAddress()),
 		func(store *store.Store) {
 			natsCore.SetSessionProvider(store.SessionProvider)
+			store.MultiConnector.AddConnector(nats.NewConnector(natsCore))
 			store.ModifiableNotificationConsumer = nats.NewNotificationConsumer(natsCore)
 			store.ModifiableNotificationPublisher = notificationManager
 		},
