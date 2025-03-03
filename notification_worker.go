@@ -51,7 +51,7 @@ func (w *notificationWorker) OnStoreConnected(ctx context.Context) {
 	w.isStoreConnected = true
 
 	if w.modeManager.HasModes(ModeWrite) {
-		w.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationSubject(), w.handleNotificationRequest)
+		w.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationRegistrationSubject(), w.handleNotificationRequest)
 	}
 }
 func (w *notificationWorker) OnStoreDisconnected() {
@@ -131,8 +131,7 @@ func (w *notificationWorker) sendResponse(msg *nats.Msg, response proto.Message)
 
 	apiMsg := &protobufs.ApiMessage{
 		Header: &protobufs.ApiHeader{
-			AuthenticationStatus: protobufs.ApiHeader_AUTHENTICATED,
-			Timestamp:            timestamppb.Now(),
+			Timestamp: timestamppb.Now(),
 		},
 	}
 

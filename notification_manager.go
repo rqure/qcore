@@ -91,7 +91,16 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 			}
 		}
 
-		p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		// Choose the appropriate subject based on distribution setting
+		if cfg.IsDistributed() {
+			// For distributed notifications, use a queue subject
+			// This ensures only one subscriber receives the notification
+			p.core.Publish(p.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		} else {
+			// For non-distributed notifications, use the regular subject
+			// All subscribers will receive the notification
+			p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		}
 	}
 
 	fetchedEntity := p.entityManager.GetEntity(ctx, indirectEntity)
@@ -122,7 +131,16 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 			}
 		}
 
-		p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		// Choose the appropriate subject based on distribution setting
+		if cfg.IsDistributed() {
+			// For distributed notifications, use a queue subject
+			// This ensures only one subscriber receives the notification
+			p.core.Publish(p.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		} else {
+			// For non-distributed notifications, use the regular subject
+			// All subscribers will receive the notification
+			p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+		}
 	}
 }
 

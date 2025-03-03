@@ -214,8 +214,7 @@ func (w *writeWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 
 	apiMsg := &protobufs.ApiMessage{
 		Header: &protobufs.ApiHeader{
-			AuthenticationStatus: protobufs.ApiHeader_AUTHENTICATED,
-			Timestamp:            timestamppb.Now(),
+			Timestamp: timestamppb.Now(),
 		},
 	}
 
