@@ -3,13 +3,13 @@ module github.com/rqure/qcore
 go 1.22.7
 
 require (
-	github.com/Nerzal/gocloak/v13 v13.9.0
 	github.com/nats-io/nats.go v1.39.1
-	github.com/rqure/qlib v0.1.5
+	github.com/rqure/qlib v0.1.7
 	google.golang.org/protobuf v1.36.1
 )
 
 require (
+	github.com/Nerzal/gocloak/v13 v13.9.0 // indirect
 	github.com/d5/tengo/v2 v2.17.0 // indirect
 	github.com/go-resty/resty/v2 v2.7.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.0.0 // indirect

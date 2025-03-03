@@ -2,29 +2,19 @@ package main
 
 import (
 	"context"
-	"os"
+	"time"
 
 	"github.com/rqure/qlib/pkg/app"
+	"github.com/rqure/qlib/pkg/auth"
 	"github.com/rqure/qlib/pkg/log"
 )
 
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
+type SessionWorkerState string
 
-	return value
-}
-
-func generateRealmConfigFromEnv() *RealmConfig {
-	return &RealmConfig{
-		AdminUsername: getEnvOrDefault("Q_KEYCLOAK_ADMIN_USERNAME", "admin"),
-		AdminPassword: getEnvOrDefault("Q_KEYCLOAK_ADMIN_PASSWORD", "admin"),
-		BaseURL:       getEnvOrDefault("Q_KEYCLOAK_BASE_URL", "http://keycloak:8080/auth"),
-		MasterRealm:   getEnvOrDefault("Q_KEYCLOAK_MASTER_REALM", "master"),
-	}
-}
+const (
+	SessionWorkerState_Init         SessionWorkerState = "Init"
+	SessionWorkerState_PeriodicSync SessionWorkerState = "PeriodicSync"
+)
 
 type SessionWorker interface {
 	app.Worker
@@ -33,34 +23,57 @@ type SessionWorker interface {
 }
 
 type sessionWorker struct {
-	handle             app.Handle
-	keycloakInteractor KeycloakInteractor
-	isStoreConnected   bool
+	handle           app.Handle
+	isStoreConnected bool
+	core             auth.Core
+	admin            auth.Admin
+	state            SessionWorkerState
+
+	initTimer *time.Timer
 }
 
 func NewSessionWorker() SessionWorker {
-	return &sessionWorker{}
+	return &sessionWorker{
+		state: SessionWorkerState_Init,
+	}
 }
 
 func (w *sessionWorker) Init(ctx context.Context, handle app.Handle) {
 	w.handle = handle
+	w.core = auth.NewCore()
+	w.admin = auth.NewAdmin(w.core)
+
+	w.initTimer = time.NewTimer(5 * time.Second)
 }
 
-func (w *sessionWorker) Deinit(context.Context) {}
+func (w *sessionWorker) Deinit(context.Context) {
+	w.initTimer.Stop()
+}
 
 func (w *sessionWorker) DoWork(ctx context.Context) {
-	if !w.isStoreConnected {
-		return
-	}
+	switch w.state {
+	case SessionWorkerState_Init:
+		select {
+		case <-w.initTimer.C:
+			log.Info("Ensuring setup of auth database...")
+			err := w.admin.EnsureSetup(ctx)
+			if err != nil {
+				log.Error("Failed to ensure setup: %v", err)
+				return
+			}
 
-	if w.keycloakInteractor == nil {
-		ki, err := NewKeycloakInteractor(ctx, generateRealmConfigFromEnv())
-		if err != nil {
-			log.Error("Could not create keycloak interactor: %v", err)
+			log.Info("Setup of auth database complete")
+			w.state = SessionWorkerState_PeriodicSync
+		default:
+			return
+		}
+	case SessionWorkerState_PeriodicSync:
+		if !w.isStoreConnected {
 			return
 		}
 
-		w.keycloakInteractor = ki
+	default:
+		log.Panic("Unknown state")
 	}
 }
 

@@ -47,16 +47,21 @@ func main() {
 	writeWorker := NewWriteWorker(s, natsCore, modeManager)
 	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
 
+	sessionWorker := NewSessionWorker()
+
 	// Connect store signals
 	storeWorker.Connected.Connect(readWorker.OnStoreConnected)
 	storeWorker.Connected.Connect(writeWorker.OnStoreConnected)
 	storeWorker.Connected.Connect(notificationWorker.OnStoreConnected)
+	storeWorker.Connected.Connect(sessionWorker.OnStoreConnected)
 
 	storeWorker.Disconnected.Connect(readWorker.OnStoreDisconnected)
 	storeWorker.Disconnected.Connect(writeWorker.OnStoreDisconnected)
 	storeWorker.Disconnected.Connect(notificationWorker.OnStoreDisconnected)
+	storeWorker.Disconnected.Connect(sessionWorker.OnStoreDisconnected)
 
 	a := app.NewApplication("store")
+	a.AddWorker(sessionWorker)
 	a.AddWorker(storeWorker)
 	a.AddWorker(readWorker)
 	a.AddWorker(writeWorker)
