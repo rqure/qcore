@@ -108,7 +108,7 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 			log.Info("Processing new session events...")
 			err := me.eventEmitter.ProcessNextBatch(ctx, session)
 			if err != nil {
-				log.Error("Failed to process new session events: %v", err)
+				log.Error("Failed to process all new session events: %v", err)
 				return
 			}
 			log.Info("Processing new session events complete")
