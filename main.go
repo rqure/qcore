@@ -49,7 +49,7 @@ func main() {
 	writeWorker := NewWriteWorker(s, natsCore, modeManager)
 	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
 
-	sessionWorker := NewSessionWorker()
+	sessionWorker := NewSessionWorker(s)
 
 	// Connect store signals
 	storeWorker.Connected.Connect(initStoreWorker.OnStoreConnected)
