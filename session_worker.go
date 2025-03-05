@@ -6,14 +6,22 @@ import (
 
 	"github.com/rqure/qlib/pkg/app"
 	"github.com/rqure/qlib/pkg/auth"
+	"github.com/rqure/qlib/pkg/data"
+	"github.com/rqure/qlib/pkg/data/query"
 	"github.com/rqure/qlib/pkg/log"
+)
+
+const (
+	initSyncInterval  = 5 * time.Second
+	fullSyncInterval  = 1 * time.Minute
+	eventPollInterval = 1 * time.Second
 )
 
 type SessionWorkerState string
 
 const (
-	SessionWorkerState_Init         SessionWorkerState = "Init"
-	SessionWorkerState_PeriodicSync SessionWorkerState = "PeriodicSync"
+	SessionWorkerState_Init SessionWorkerState = "Init"
+	SessionWorkerState_Sync SessionWorkerState = "Sync"
 )
 
 type SessionWorker interface {
@@ -23,64 +31,118 @@ type SessionWorker interface {
 }
 
 type sessionWorker struct {
-	handle           app.Handle
-	isStoreConnected bool
-	core             auth.Core
-	admin            auth.Admin
-	state            SessionWorkerState
+	handle app.Handle
 
-	initTimer *time.Timer
+	store            data.Store
+	isStoreConnected bool
+
+	state SessionWorkerState
+
+	core         auth.Core
+	admin        auth.Admin
+	eventEmitter auth.EventEmitter
+
+	initTimer      *time.Timer
+	fullSyncTimer  *time.Timer
+	eventPollTimer *time.Timer
 }
 
-func NewSessionWorker() SessionWorker {
+func NewSessionWorker(store data.Store) SessionWorker {
 	return &sessionWorker{
+		store: store,
 		state: SessionWorkerState_Init,
 	}
 }
 
-func (w *sessionWorker) Init(ctx context.Context, handle app.Handle) {
-	w.handle = handle
-	w.core = auth.NewCore()
-	w.admin = auth.NewAdmin(w.core)
+func (me *sessionWorker) Init(ctx context.Context, handle app.Handle) {
+	me.handle = handle
+	me.core = auth.NewCore()
+	me.admin = auth.NewAdmin(me.core)
+	me.eventEmitter = auth.NewEventEmitter(me.core)
 
-	w.initTimer = time.NewTimer(5 * time.Second)
+	me.initTimer = time.NewTimer(initSyncInterval)
+	me.fullSyncTimer = time.NewTimer(fullSyncInterval)
+	me.eventPollTimer = time.NewTimer(eventPollInterval)
 }
 
-func (w *sessionWorker) Deinit(context.Context) {
-	w.initTimer.Stop()
+func (me *sessionWorker) Deinit(context.Context) {
+	me.initTimer.Stop()
+	me.fullSyncTimer.Stop()
+	me.eventPollTimer.Stop()
 }
 
-func (w *sessionWorker) DoWork(ctx context.Context) {
-	switch w.state {
+func (me *sessionWorker) DoWork(ctx context.Context) {
+	session := me.admin.Session(ctx)
+	if session.IsValid(ctx) {
+		if session.PastHalfLife(ctx) {
+			session.Refresh(ctx)
+		}
+	}
+
+	switch me.state {
 	case SessionWorkerState_Init:
 		select {
-		case <-w.initTimer.C:
+		case <-me.initTimer.C:
 			log.Info("Ensuring setup of auth database...")
-			err := w.admin.EnsureSetup(ctx)
+			err := me.admin.EnsureSetup(ctx)
 			if err != nil {
 				log.Error("Failed to ensure setup: %v", err)
 				return
 			}
 
 			log.Info("Setup of auth database complete")
-			w.state = SessionWorkerState_PeriodicSync
+			me.state = SessionWorkerState_Sync
 		default:
 			return
 		}
-	case SessionWorkerState_PeriodicSync:
-		if !w.isStoreConnected {
+	case SessionWorkerState_Sync:
+		if !me.isStoreConnected {
 			return
 		}
 
+		select {
+		case <-me.fullSyncTimer.C:
+			log.Info("Performing full sync...")
+			log.Info("Full sync complete")
+		case <-me.eventPollTimer.C:
+			log.Info("Processing new session events...")
+			err := me.eventEmitter.ProcessNextBatch(ctx, session)
+			if err != nil {
+				log.Error("Failed to process new session events: %v", err)
+				return
+			}
+			log.Info("Processing new session events complete")
+		}
 	default:
 		log.Panic("Unknown state")
 	}
 }
 
-func (w *sessionWorker) OnStoreConnected(context.Context) {
-	w.isStoreConnected = true
+func (me *sessionWorker) OnStoreConnected(ctx context.Context) {
+	me.isStoreConnected = true
+
+	sessionControllers := query.New(me.store).
+		Select().
+		From("SessionController").
+		Execute(ctx)
+
+	for _, sessionController := range sessionControllers {
+		lastEventTime := sessionController.GetField("LastEventTime").ReadTimestamp(ctx)
+		me.eventEmitter.SetLastEventTime(lastEventTime)
+	}
 }
 
-func (w *sessionWorker) OnStoreDisconnected(context.Context) {
-	w.isStoreConnected = false
+func (me *sessionWorker) OnStoreDisconnected(context.Context) {
+	me.isStoreConnected = false
+}
+
+func (me *sessionWorker) onEvent(ctx context.Context, event auth.Event) {
+	sessionControllers := query.New(me.store).
+		Select().
+		From("SessionController").
+		Execute(ctx)
+
+	for _, sessionController := range sessionControllers {
+		sessionController.GetField("LastEventTime").WriteTimestamp(ctx, time.Now())
+	}
 }

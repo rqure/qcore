@@ -90,6 +90,9 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 			{Name: "AreasOfResponsibilities", Type: field.EntityList},
 			{Name: "SelectedAORs", Type: field.EntityReference},
 			{Name: "SourceOfTruth", Type: field.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}}, // Where the user information is coming from
+			{Name: "KeycloakId", Type: field.String},                                                // Keycloak user ID
+			{Name: "LastLoginTime", Type: field.Timestamp},
+			{Name: "LastLogoutTime", Type: field.Timestamp},
 		},
 	}))
 
@@ -97,6 +100,14 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 		Name: "Client",
 		Fields: []*protobufs.DatabaseFieldSchema{
 			{Name: "Permissions", Type: field.EntityList}, // All permissions assigned to the client
+		},
+	}))
+
+	w.ensureEntitySchema(ctx, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "SessionController",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "LastEventTime", Type: field.Timestamp},
+			{Name: "Logout", Type: field.EntityReference},
 		},
 	}))
 
