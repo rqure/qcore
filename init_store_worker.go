@@ -91,8 +91,12 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 			{Name: "SelectedAORs", Type: field.EntityReference},
 			{Name: "SourceOfTruth", Type: field.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}}, // Where the user information is coming from
 			{Name: "KeycloakId", Type: field.String},                                                // Keycloak user ID
-			{Name: "LastLoginTime", Type: field.Timestamp},
-			{Name: "LastLogoutTime", Type: field.Timestamp},
+			{Name: "Email", Type: field.String},
+			{Name: "FirstName", Type: field.String},
+			{Name: "LastName", Type: field.String},
+			{Name: "IsEmailVerified", Type: field.Bool},
+			{Name: "IsEnabled", Type: field.Bool},
+			{Name: "JSON", Type: field.String},
 		},
 	}))
 
