@@ -49,6 +49,8 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 
 	w.init = true
 
+	w.store.InitializeIfRequired(ctx)
+
 	// Create any missing entity schemas
 	w.ensureEntitySchema(ctx, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
 		Name: "Root",

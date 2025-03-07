@@ -282,7 +282,7 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 		for _, user := range users {
 			authorizer := store.NewFieldAuthorizer(user.GetId(), w.store)
-			w.store.Read(context.WithValue(ctx, "authorizer", authorizer), reqs...)
+			w.store.Read(context.WithValue(ctx, data.FieldAuthorizerKey, authorizer), reqs...)
 
 			// Break after first user
 			break
@@ -297,7 +297,7 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 			for _, client := range clients {
 				authorizer := store.NewFieldAuthorizer(client.GetId(), w.store)
-				w.store.Read(context.WithValue(ctx, "authorizer", authorizer), reqs...)
+				w.store.Read(context.WithValue(ctx, data.FieldAuthorizerKey, authorizer), reqs...)
 
 				// Break after first client
 				break
