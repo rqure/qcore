@@ -4,7 +4,7 @@ go 1.22.7
 
 require (
 	github.com/nats-io/nats.go v1.39.1
-	github.com/rqure/qlib v0.1.17
+	github.com/rqure/qlib v0.1.18
 	google.golang.org/protobuf v1.36.1
 )
 

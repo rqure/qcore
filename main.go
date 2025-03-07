@@ -65,11 +65,11 @@ func main() {
 	storeWorker.Disconnected.Connect(sessionWorker.OnStoreDisconnected)
 
 	a := app.NewApplication("core")
-	a.AddWorker(sessionWorker)
 	a.AddWorker(initStoreWorker)
+	// a.AddWorker(sessionWorker)
 	a.AddWorker(storeWorker)
-	a.AddWorker(readWorker)
-	a.AddWorker(writeWorker)
-	a.AddWorker(notificationWorker)
+	// a.AddWorker(readWorker)
+	// a.AddWorker(writeWorker)
+	// a.AddWorker(notificationWorker)
 	a.Execute()
 }
