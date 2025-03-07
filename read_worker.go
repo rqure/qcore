@@ -9,6 +9,7 @@ import (
 	"github.com/rqure/qlib/pkg/data/entity"
 	"github.com/rqure/qlib/pkg/data/query"
 	"github.com/rqure/qlib/pkg/data/request"
+	"github.com/rqure/qlib/pkg/data/store"
 	qnats "github.com/rqure/qlib/pkg/data/store/nats"
 	"github.com/rqure/qlib/pkg/log"
 	"github.com/rqure/qlib/pkg/protobufs"
@@ -259,7 +260,50 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	}
 
 	log.Info("Read request: %v", req.Requests)
-	w.store.Read(ctx, reqs...)
+	if client := w.store.AuthClient(ctx); client != nil {
+		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
+
+		if !accessorSession.IsValid(ctx) {
+			log.Warn("Invalid session")
+			return
+		}
+
+		accessorName, err := accessorSession.GetOwnerName(ctx)
+		if err != nil {
+			log.Error("Could not get owner name: %v", err)
+			return
+		}
+
+		users := query.New(w.store).
+			Select().
+			From("User").
+			Where("Name").Equals(accessorName).
+			Execute(ctx)
+
+		for _, user := range users {
+			authorizer := store.NewFieldAuthorizer(user.GetId(), w.store)
+			w.store.Read(context.WithValue(ctx, "authorizer", authorizer), reqs...)
+
+			// Break after first user
+			break
+		}
+
+		if len(users) == 0 {
+			clients := query.New(w.store).
+				Select().
+				From("Client").
+				Where("Name").Equals(accessorName).
+				Execute(ctx)
+
+			for _, client := range clients {
+				authorizer := store.NewFieldAuthorizer(client.GetId(), w.store)
+				w.store.Read(context.WithValue(ctx, "authorizer", authorizer), reqs...)
+
+				// Break after first client
+				break
+			}
+		}
+	}
 
 	rsp.Response = req.Requests
 
