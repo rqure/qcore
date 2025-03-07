@@ -106,6 +106,7 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 		select {
 		case <-me.fullSyncTimer.C:
 			log.Info("Performing full sync...")
+			me.performFullSync(ctx)
 			log.Info("Full sync complete")
 		case <-me.eventPollTimer.C:
 			log.Info("Processing new session events...")
@@ -115,6 +116,8 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 				return
 			}
 			log.Info("Processing new session events complete")
+		default:
+			return
 		}
 	default:
 		log.Panic("Unknown state")

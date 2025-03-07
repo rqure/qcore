@@ -49,6 +49,8 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 
 	w.init = true
 
+	log.Info("Ensuring store is initialized")
+
 	w.store.InitializeIfRequired(ctx)
 
 	// Create any missing entity schemas
@@ -155,6 +157,8 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 	coreClient.DoMulti(ctx, func(client data.EntityBinding) {
 		client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
 	})
+
+	log.Info("Store initialization sequence complete")
 }
 
 func (w *initStoreWorker) OnStoreDisconnected() {}
@@ -188,6 +192,7 @@ func (w *initStoreWorker) ensureEntity(ctx context.Context, entityType string, p
 	var currentNode data.Entity
 	if len(roots) == 0 {
 		if entityType == "Root" {
+			log.Info("Creating root entity '%s'", path[0])
 			rootId := w.store.CreateEntity(ctx, "Root", "", path[0])
 			currentNode = w.store.GetEntity(ctx, rootId)
 		} else {
@@ -216,6 +221,7 @@ func (w *initStoreWorker) ensureEntity(ctx context.Context, entityType string, p
 
 		lastIndex := len(path) - 2
 		if len(entity) == 0 && i == lastIndex {
+			log.Info("Creating entity '%s' (%d) in path %v", name, i+1, path)
 			entityId := w.store.CreateEntity(ctx, entityType, currentNode.GetId(), name)
 			return binding.NewEntity(ctx, w.store, entityId)
 		} else {
