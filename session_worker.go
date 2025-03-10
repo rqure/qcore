@@ -29,7 +29,7 @@ const (
 type SessionWorker interface {
 	app.Worker
 	OnStoreConnected(context.Context)
-	OnStoreDisconnected(context.Context)
+	OnStoreDisconnected()
 }
 
 type sessionWorker struct {
@@ -138,7 +138,7 @@ func (me *sessionWorker) OnStoreConnected(ctx context.Context) {
 	}
 }
 
-func (me *sessionWorker) OnStoreDisconnected(context.Context) {
+func (me *sessionWorker) OnStoreDisconnected() {
 	me.isStoreConnected = false
 }
 

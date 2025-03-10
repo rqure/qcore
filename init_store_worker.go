@@ -122,41 +122,41 @@ func (w *initStoreWorker) OnStoreConnected(ctx context.Context) {
 	// Create any missing entities
 	w.ensureEntity(ctx, "Root", "Root")
 
-	// Create the security models
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models")
+	// // Create the security models
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models")
 
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Permissions")
-	systemPermission := w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System")
-	w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Security")
-	w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Configuration")
-	w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Application")
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Permissions")
+	// systemPermission := w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System")
+	// w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Security")
+	// w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Configuration")
+	// w.ensureEntity(ctx, "Permission", "Root", "Security Models", "Permissions", "System", "Application")
 
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Areas of Responsibility")
-	systemAor := w.ensureEntity(ctx, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
-	w.ensureEntity(ctx, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System", "Database")
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Areas of Responsibility")
+	// systemAor := w.ensureEntity(ctx, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+	// w.ensureEntity(ctx, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System", "Database")
 
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Roles")
-	adminRole := w.ensureEntity(ctx, "Role", "Root", "Security Models", "Roles", "Admin")
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Roles")
+	// adminRole := w.ensureEntity(ctx, "Role", "Root", "Security Models", "Roles", "Admin")
 
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Users")
-	adminUser := w.ensureEntity(ctx, "User", "Root", "Security Models", "Users", "qei")
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Users")
+	// adminUser := w.ensureEntity(ctx, "User", "Root", "Security Models", "Users", "qei")
 
-	w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Clients")
-	coreClient := w.ensureEntity(ctx, "Client", "Root", "Security Models", "Clients", "core")
+	// w.ensureEntity(ctx, "Folder", "Root", "Security Models", "Clients")
+	// coreClient := w.ensureEntity(ctx, "Client", "Root", "Security Models", "Clients", "core")
 
-	adminRole.DoMulti(ctx, func(role data.EntityBinding) {
-		role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
-		role.GetField("AreasOfResponsibilities").WriteEntityList(ctx, []string{systemAor.GetId()})
-	})
+	// adminRole.DoMulti(ctx, func(role data.EntityBinding) {
+	// 	role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
+	// 	role.GetField("AreasOfResponsibilities").WriteEntityList(ctx, []string{systemAor.GetId()})
+	// })
 
-	adminUser.DoMulti(ctx, func(user data.EntityBinding) {
-		user.GetField("Roles").WriteEntityList(ctx, []string{adminRole.GetId()})
-		user.GetField("SourceOfTruth").WriteChoice(ctx, "QOS")
-	})
+	// adminUser.DoMulti(ctx, func(user data.EntityBinding) {
+	// 	user.GetField("Roles").WriteEntityList(ctx, []string{adminRole.GetId()})
+	// 	user.GetField("SourceOfTruth").WriteChoice(ctx, "QOS")
+	// })
 
-	coreClient.DoMulti(ctx, func(client data.EntityBinding) {
-		client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
-	})
+	// coreClient.DoMulti(ctx, func(client data.EntityBinding) {
+	// 	client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
+	// })
 
 	log.Info("Store initialization sequence complete")
 }

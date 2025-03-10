@@ -63,7 +63,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 	changed := !proto.Equal(field.ToAnyPb(curr.GetValue()), field.ToAnyPb(prev.GetValue()))
 
 	resolver := query.NewIndirectionResolver(p.entityManager, p.fieldOperator)
-	indirectField, indirectEntity := resolver.Resolve(ctx, curr.GetEntityId(), curr.GetFieldName())
+	indirectEntity, indirectField := resolver.Resolve(ctx, curr.GetEntityId(), curr.GetFieldName())
 
 	if indirectField == "" || indirectEntity == "" {
 		log.Error("Failed to resolve indirection: %v", curr)
