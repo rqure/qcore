@@ -236,5 +236,9 @@ func (w *initStoreWorker) ensureEntity(ctx context.Context, entityType string, p
 		}
 	}
 
+	if currentNode == nil {
+		return nil
+	}
+
 	return binding.NewEntity(ctx, w.store, currentNode.GetId())
 }

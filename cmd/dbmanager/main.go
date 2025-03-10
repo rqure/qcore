@@ -9,7 +9,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rqure/qlib/pkg/data"
+	"github.com/rqure/qlib/pkg/data/binding"
+	"github.com/rqure/qlib/pkg/data/entity"
+	"github.com/rqure/qlib/pkg/data/field"
+	"github.com/rqure/qlib/pkg/data/query"
+	"github.com/rqure/qlib/pkg/data/store"
 	"github.com/rqure/qlib/pkg/log"
+	"github.com/rqure/qlib/pkg/protobufs"
 )
 
 const (
@@ -25,12 +32,14 @@ var (
 	qstoreDB     bool
 	timeout      int
 	confirm      bool
+	initialize   bool
 )
 
 func init() {
 	flag.StringVar(&postgresAddr, "postgres", getEnvOrDefault("Q_POSTGRES_ADDR", defaultPostgresAddr), "PostgreSQL connection string")
 	flag.BoolVar(&create, "create", false, "Create databases")
 	flag.BoolVar(&drop, "drop", false, "Drop databases")
+	flag.BoolVar(&initialize, "initialize", false, "Initialize database schemas")
 	flag.BoolVar(&qstoreDB, "qstore", false, "Manage qstore database")
 	flag.BoolVar(&keycloakDB, "keycloak", false, "Manage keycloak database")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
@@ -54,8 +63,8 @@ func main() {
 		return
 	}
 
-	if !create && !drop {
-		log.Info("No operation selected. Use -create or -drop flags.")
+	if !create && !drop && !initialize {
+		log.Info("No operation selected. Use -create, -drop, or -initialize flags.")
 		return
 	}
 
@@ -85,6 +94,15 @@ func main() {
 				log.Error("Failed to create qstore database: %v", err)
 			} else {
 				log.Info("qstore database created successfully")
+			}
+		}
+
+		if initialize {
+			log.Info("Initializing qstore database schema...")
+			if err := initializeQStoreSchema(ctx); err != nil {
+				log.Error("Failed to initialize qstore schema: %v", err)
+			} else {
+				log.Info("qstore schema initialized successfully")
 			}
 		}
 
@@ -163,6 +181,28 @@ func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to grant privileges to qcore user: %w", err)
 	}
 	log.Info("privileges granted to qcore user")
+
+	// Connect to the qstore database specifically to grant schema permissions
+	qstoreConnString := strings.Replace(postgresAddr, "/postgres?", "/qstore?", 1)
+	qstorePool, err := pgxpool.New(ctx, qstoreConnString)
+	if err != nil {
+		return fmt.Errorf("failed to connect to qstore database: %w", err)
+	}
+	defer qstorePool.Close()
+
+	// Grant schema permissions to qcore user
+	_, err = qstorePool.Exec(ctx, "GRANT ALL ON SCHEMA public TO qcore")
+	if err != nil {
+		return fmt.Errorf("failed to grant schema permissions to qcore user: %w", err)
+	}
+	log.Info("schema permissions granted to qcore user")
+
+	// Set qcore user as owner of public schema in qstore database
+	_, err = qstorePool.Exec(ctx, "ALTER SCHEMA public OWNER TO qcore")
+	if err != nil {
+		return fmt.Errorf("failed to set schema owner: %w", err)
+	}
+	log.Info("schema ownership set for qcore user")
 
 	return nil
 }
@@ -303,4 +343,189 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 
 	log.Info("keycloak database dropped")
 	return nil
+}
+
+func initializeQStoreSchema(ctx context.Context) error {
+	// Connect to qstore database using the store interface
+	qstoreConnString := strings.Replace(postgresAddr, "/postgres?", "/qstore?", 1)
+	// Use qcore credentials for connecting
+	qstoreConnString = strings.Replace(qstoreConnString, "postgres:postgres", "qcore:qcore", 1)
+
+	// Create a store instance to interact with the database
+	s := store.New(
+		store.PersistOverPostgres(qstoreConnString),
+	)
+
+	// Connect to the database
+	s.Connect(ctx)
+	defer s.Disconnect(ctx)
+
+	// Wait for connection to establish
+	startTime := time.Now()
+	timeout := 30 * time.Second
+	for !s.IsConnected(ctx) {
+		if time.Since(startTime) > timeout {
+			return fmt.Errorf("timeout waiting for database connection")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	log.Info("Connected to qstore database")
+
+	// Initialize the database if required
+	s.InitializeIfRequired(ctx)
+
+	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "Root",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "SchemaUpdateTrigger", Type: field.Choice, ChoiceOptions: []string{"Trigger"}},
+		},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name:   "Folder",
+		Fields: []*protobufs.DatabaseFieldSchema{},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name:   "Permission",
+		Fields: []*protobufs.DatabaseFieldSchema{},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name:   "AreaOfResponsibility",
+		Fields: []*protobufs.DatabaseFieldSchema{},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "Role",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "Permissions", Type: field.EntityList},
+			{Name: "AreasOfResponsibilities", Type: field.EntityList},
+		},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "User",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "Roles", Type: field.EntityList},
+			{Name: "SelectedRole", Type: field.EntityReference},
+			{Name: "Permissions", Type: field.EntityList},
+			{Name: "TotalPermissions", Type: field.EntityList},
+			{Name: "AreasOfResponsibilities", Type: field.EntityList},
+			{Name: "SelectedAORs", Type: field.EntityReference},
+			{Name: "SourceOfTruth", Type: field.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}},
+			{Name: "KeycloakId", Type: field.String},
+			{Name: "Email", Type: field.String},
+			{Name: "FirstName", Type: field.String},
+			{Name: "LastName", Type: field.String},
+			{Name: "IsEmailVerified", Type: field.Bool},
+			{Name: "IsEnabled", Type: field.Bool},
+			{Name: "JSON", Type: field.String},
+		},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "Client",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "Permissions", Type: field.EntityList},
+		},
+	}))
+
+	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+		Name: "SessionController",
+		Fields: []*protobufs.DatabaseFieldSchema{
+			{Name: "LastEventTime", Type: field.Timestamp},
+			{Name: "Logout", Type: field.EntityReference},
+		},
+	}))
+
+	// Create root entity
+	ensureEntity(ctx, s, "Root", "Root")
+
+	log.Info("Database schema initialization complete")
+	return nil
+}
+
+// Helper functions moved from init_store_worker
+func ensureEntitySchema(ctx context.Context, s data.Store, schema data.EntitySchema) {
+	actualSchema := s.GetEntitySchema(ctx, schema.GetType())
+	if actualSchema != nil {
+		// Otherwise adding any missing fields to the actual schema
+		for _, field := range schema.GetFields() {
+			actualSchema.SetField(field.GetFieldName(), field)
+		}
+	} else {
+		actualSchema = schema
+	}
+
+	s.SetEntitySchema(ctx, actualSchema)
+	log.Info("Ensured entity schema: %s", schema.GetType())
+}
+
+func ensureEntity(ctx context.Context, s data.Store, entityType string, path ...string) data.EntityBinding {
+	// The first element should be the root entity
+	if len(path) == 0 {
+		return nil
+	}
+
+	roots := query.New(s).
+		Select("Name").
+		From("Root").
+		Where("Name").Equals(path[0]).
+		Execute(ctx)
+
+	var currentNode data.Entity
+	if len(roots) == 0 {
+		if entityType == "Root" {
+			log.Info("Creating root entity '%s'", path[0])
+			rootId := s.CreateEntity(ctx, "Root", "", path[0])
+			currentNode = s.GetEntity(ctx, rootId)
+		} else {
+			log.Error("Root entity not found")
+			return nil
+		}
+	} else {
+		currentNode = roots[0]
+
+		if len(roots) > 1 && len(path) > 1 {
+			log.Warn("Multiple root entities found: %v", roots)
+		} else if len(path) == 1 {
+			return binding.NewEntity(ctx, s, currentNode.GetId())
+		}
+	}
+
+	// Create the last item in the path
+	// Return early if the intermediate entities are not found
+	for i, name := range path[1:] {
+		entity := query.New(s).
+			Select("Name").
+			From(entityType).
+			Where("Name").Equals(name).
+			Where("Parent").Equals(currentNode.GetId()).
+			Execute(ctx)
+
+		lastIndex := len(path) - 2
+		if len(entity) == 0 && i == lastIndex {
+			log.Info("Creating entity '%s' (%d) in path %v", name, i+1, path)
+			entityId := s.CreateEntity(ctx, entityType, currentNode.GetId(), name)
+			return binding.NewEntity(ctx, s, entityId)
+		} else {
+			if len(entity) == 0 {
+				log.Error("Entity '%s' (%d) not found in path %v", name, i+1, path)
+				return nil
+			} else if len(entity) > 1 {
+				log.Warn("Multiple entities with name '%s' (%d) found in path '%v': %v", name, i+1, path, entity)
+			}
+
+			currentNode = entity[0]
+		}
+	}
+
+	if currentNode == nil {
+		return nil
+	}
+
+	return binding.NewEntity(ctx, s, currentNode.GetId())
 }
