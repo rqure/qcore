@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -242,7 +243,29 @@ func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("failed to grant privileges to keycloak user: %w", err)
 	}
-	log.Info("privileges granted to keycloak user")
+	log.Info("privileges granted to keycloak user on database")
+
+	// Connect to the keycloak database specifically to grant schema permissions
+	keycloakConnString := strings.Replace(postgresAddr, "/postgres?", "/keycloak?", 1)
+	keycloakPool, err := pgxpool.New(ctx, keycloakConnString)
+	if err != nil {
+		return fmt.Errorf("failed to connect to keycloak database: %w", err)
+	}
+	defer keycloakPool.Close()
+
+	// Grant schema permissions to keycloak user
+	_, err = keycloakPool.Exec(ctx, "GRANT ALL ON SCHEMA public TO keycloak")
+	if err != nil {
+		return fmt.Errorf("failed to grant schema permissions to keycloak user: %w", err)
+	}
+	log.Info("schema permissions granted to keycloak user")
+
+	// Set keycloak user as owner of public schema in keycloak database
+	_, err = keycloakPool.Exec(ctx, "ALTER SCHEMA public OWNER TO keycloak")
+	if err != nil {
+		return fmt.Errorf("failed to set schema owner: %w", err)
+	}
+	log.Info("schema ownership set for keycloak user")
 
 	return nil
 }
