@@ -544,15 +544,15 @@ func ensureEntity(ctx context.Context, s data.Store, entityType string, path ...
 
 		lastIndex := len(path) - 2
 		if len(entity) == 0 && i == lastIndex {
-			log.Info("Creating entity '%s' (%d) in path %v", name, i+1, path)
+			log.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
 			entityId := s.CreateEntity(ctx, entityType, currentNode.GetId(), name)
 			return binding.NewEntity(ctx, s, entityId)
 		} else {
 			if len(entity) == 0 {
-				log.Error("Entity '%s' (%d) not found in path %v", name, i+1, path)
+				log.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
 				return nil
 			} else if len(entity) > 1 {
-				log.Warn("Multiple entities with name '%s' (%d) found in path '%v': %v", name, i+1, path, entity)
+				log.Warn("Multiple entities with name '%s' (%d) found in path '%s': %v", name, i+1, strings.Join(path, "/"), entity)
 			}
 
 			currentNode = entity[0]
