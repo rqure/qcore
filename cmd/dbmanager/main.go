@@ -500,24 +500,24 @@ func ensureEntitySchema(ctx context.Context, s data.Store, schema data.EntitySch
 	log.Info("Ensured entity schema: %s", schema.GetType())
 }
 
-func ensureEntity(ctx context.Context, s data.Store, entityType string, path ...string) data.EntityBinding {
+func ensureEntity(ctx context.Context, store data.Store, entityType string, path ...string) data.EntityBinding {
 	// The first element should be the root entity
 	if len(path) == 0 {
 		return nil
 	}
 
-	roots := query.New(s).
+	roots := query.New(store).
 		Select("Name").
 		From("Root").
 		Where("Name").Equals(path[0]).
 		Execute(ctx)
 
-	var currentNode data.Entity
+	var currentNode data.EntityBinding
 	if len(roots) == 0 {
 		if entityType == "Root" {
 			log.Info("Creating root entity '%s'", path[0])
-			rootId := s.CreateEntity(ctx, "Root", "", path[0])
-			currentNode = s.GetEntity(ctx, rootId)
+			rootId := store.CreateEntity(ctx, "Root", "", path[0])
+			currentNode = binding.NewEntity(ctx, store, rootId)
 		} else {
 			log.Error("Root entity not found")
 			return nil
@@ -528,40 +528,40 @@ func ensureEntity(ctx context.Context, s data.Store, entityType string, path ...
 		if len(roots) > 1 && len(path) > 1 {
 			log.Warn("Multiple root entities found: %v", roots)
 		} else if len(path) == 1 {
-			return binding.NewEntity(ctx, s, currentNode.GetId())
+			return binding.NewEntity(ctx, store, currentNode.GetId())
 		}
 	}
 
 	// Create the last item in the path
 	// Return early if the intermediate entities are not found
+	lastIndex := len(path) - 2
 	for i, name := range path[1:] {
-		entity := query.New(s).
-			Select("Name").
-			From(entityType).
-			Where("Name").Equals(name).
-			Where("Parent").Equals(currentNode.GetId()).
-			Execute(ctx)
+		children := currentNode.GetField("Children").ReadEntityList(ctx).GetEntities()
 
-		lastIndex := len(path) - 2
-		if len(entity) == 0 && i == lastIndex {
-			log.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
-			entityId := s.CreateEntity(ctx, entityType, currentNode.GetId(), name)
-			return binding.NewEntity(ctx, s, entityId)
-		} else {
-			if len(entity) == 0 {
-				log.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
-				return nil
-			} else if len(entity) > 1 {
-				log.Warn("Multiple entities with name '%s' (%d) found in path '%s': %v", name, i+1, strings.Join(path, "/"), entity)
+		found := false
+		for _, childId := range children {
+			child := binding.NewEntity(ctx, store, childId)
+			if child.GetField("Name").ReadString(ctx) == name {
+				currentNode = child
+				found = true
+				break
 			}
+		}
 
-			currentNode = entity[0]
+		if !found && i == lastIndex {
+			log.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
+			entityId := store.CreateEntity(ctx, entityType, currentNode.GetId(), name)
+			return binding.NewEntity(ctx, store, entityId)
+		} else if !found {
+			log.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
+			return nil
 		}
 	}
 
 	if currentNode == nil {
+		log.Error("Current node is nil: %s", strings.Join(path, "/"))
 		return nil
 	}
 
-	return binding.NewEntity(ctx, s, currentNode.GetId())
+	return binding.NewEntity(ctx, store, currentNode.GetId())
 }
