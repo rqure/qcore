@@ -12,9 +12,9 @@ import (
 func getPostgresAddress() string {
 	addr := os.Getenv("Q_POSTGRES_ADDR")
 	if addr == "" {
-		addr = "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
+		// Use qcore user and qstore database directly in the default connection string
+		addr = "postgres://qcore:qcore@postgres:5432/qstore?sslmode=disable"
 	}
-
 	return addr
 }
 

@@ -62,3 +62,33 @@ export Q_MODES=reader
 
 # Run as write-only instance
 export Q_MODES=writer
+```
+
+## Database Management Tool
+
+qcore provides a command-line tool for managing the PostgreSQL databases:
+
+```bash
+go run cmd/dbmanager/main.go [options]
+```
+
+Options:
+- `-postgres` - PostgreSQL connection string (default: from Q_POSTGRES_ADDR env or postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable)
+- `-create` - Create databases
+- `-drop` - Drop databases
+- `-qstore` - Manage qstore database
+- `-keycloak` - Manage keycloak database
+- `-timeout` - Connection timeout in seconds (default: 30)
+- `-confirm` - Confirm destructive operations without prompt (required for drop)
+
+Examples:
+```bash
+# Create both databases
+go run cmd/dbmanager/main.go -create -qstore -keycloak
+
+# Create only qstore database
+go run cmd/dbmanager/main.go -create -qstore
+
+# Drop keycloak database (with confirmation)
+go run cmd/dbmanager/main.go -drop -keycloak -confirm
+```
