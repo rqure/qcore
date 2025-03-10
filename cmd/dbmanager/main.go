@@ -444,6 +444,42 @@ func initializeQStoreSchema(ctx context.Context) error {
 	// Create root entity
 	ensureEntity(ctx, s, "Root", "Root")
 
+	// Create the security models
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models")
+
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Permissions")
+	systemPermission := ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
+	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Security")
+	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Configuration")
+	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Application")
+
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Areas of Responsibility")
+	systemAor := ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+	ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System", "Database")
+
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Roles")
+	adminRole := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
+
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Users")
+	adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
+
+	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Clients")
+	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "core")
+
+	adminRole.DoMulti(ctx, func(role data.EntityBinding) {
+		role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
+		role.GetField("AreasOfResponsibilities").WriteEntityList(ctx, []string{systemAor.GetId()})
+	})
+
+	adminUser.DoMulti(ctx, func(user data.EntityBinding) {
+		user.GetField("Roles").WriteEntityList(ctx, []string{adminRole.GetId()})
+		user.GetField("SourceOfTruth").WriteChoice(ctx, "QOS")
+	})
+
+	coreClient.DoMulti(ctx, func(client data.EntityBinding) {
+		client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
+	})
+
 	log.Info("Database schema initialization complete")
 	return nil
 }
