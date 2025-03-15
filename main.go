@@ -58,7 +58,6 @@ func main() {
 
 	storeWorker.Disconnected.Connect(readWorker.OnStoreDisconnected)
 	storeWorker.Disconnected.Connect(writeWorker.OnStoreDisconnected)
-	storeWorker.Disconnected.Connect(notificationWorker.OnStoreDisconnected)
 	storeWorker.Disconnected.Connect(sessionWorker.OnStoreDisconnected)
 
 	a := qapp.NewApplication("core")

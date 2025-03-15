@@ -15,6 +15,7 @@ import (
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -263,7 +264,9 @@ func (w *writeWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 		},
 	}
 
-	if err := apiMsg.Payload.MarshalFrom(response); err != nil {
+	var err error
+	apiMsg.Payload, err = anypb.New(response)
+	if err != nil {
 		qlog.Error("Could not marshal response: %v", err)
 		return
 	}

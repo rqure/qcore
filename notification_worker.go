@@ -11,23 +11,21 @@ import (
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type NotificationWorker interface {
 	qapp.Worker
 	OnBeforeStoreConnected()
-	OnStoreConnected(context.Context)
-	OnStoreDisconnected()
 }
 
 type notificationWorker struct {
-	store            qdata.Store
-	natsCore         qnats.Core
-	isStoreConnected bool
-	modeManager      ModeManager
-	notifManager     NotificationManager
-	handle           qapp.Handle
+	store        qdata.Store
+	natsCore     qnats.Core
+	modeManager  ModeManager
+	notifManager NotificationManager
+	handle       qapp.Handle
 }
 
 func NewNotificationWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManager, notifManager NotificationManager) NotificationWorker {
@@ -54,14 +52,6 @@ func (me *notificationWorker) OnBeforeStoreConnected() {
 	}
 }
 
-func (me *notificationWorker) OnStoreConnected(context.Context) {
-	me.isStoreConnected = true
-}
-
-func (me *notificationWorker) OnStoreDisconnected() {
-	me.isStoreConnected = false
-}
-
 func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
 	var apiMsg qprotobufs.ApiMessage
 	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
@@ -86,12 +76,6 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 		return
 	}
 
-	if !me.isStoreConnected {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
-		me.sendResponse(msg, rsp)
-		return
-	}
-
 	for _, cfg := range req.Requests {
 		cfg := qnotify.FromConfigPb(cfg)
 		me.notifManager.Register(cfg)
@@ -107,13 +91,6 @@ func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Error("Could not unmarshal request: %v", err)
-		me.sendResponse(msg, rsp)
-		return
-	}
-
-	if !me.isStoreConnected {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
-		rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_FAILURE
 		me.sendResponse(msg, rsp)
 		return
 	}
@@ -137,7 +114,9 @@ func (me *notificationWorker) sendResponse(msg *nats.Msg, response proto.Message
 		},
 	}
 
-	if err := apiMsg.Payload.MarshalFrom(response); err != nil {
+	var err error
+	apiMsg.Payload, err = anypb.New(response)
+	if err != nil {
 		qlog.Error("Could not marshal response: %v", err)
 		return
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rqure/qlib/pkg/qdata"
@@ -35,6 +36,7 @@ type notificationManager struct {
 	entityManager qdata.EntityManager
 	fieldOperator qdata.FieldOperator
 
+	mu                      sync.RWMutex
 	registeredNotifications map[string]map[string]NotificationLease
 }
 
@@ -70,7 +72,11 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 		return
 	}
 
-	for _, lease := range me.registeredNotifications[curr.GetEntityId()] {
+	me.mu.RLock()
+	leases := me.getEntityLeases(curr.GetEntityId())
+	me.mu.RUnlock()
+
+	for _, lease := range leases {
 		cfg := lease.Config
 		if cfg.GetNotifyOnChange() && !changed {
 			continue
@@ -109,7 +115,11 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 		return
 	}
 
-	for _, lease := range me.registeredNotifications[fetchedEntity.GetType()] {
+	me.mu.RLock()
+	typeLeases := me.getEntityLeases(fetchedEntity.GetType())
+	me.mu.RUnlock()
+
+	for _, lease := range typeLeases {
 		cfg := lease.Config
 
 		if cfg.GetNotifyOnChange() && !changed {
@@ -144,11 +154,26 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 	}
 }
 
+// Helper method to safely get entity leases
+func (me *notificationManager) getEntityLeases(entityId string) []NotificationLease {
+	if leases, ok := me.registeredNotifications[entityId]; ok {
+		result := make([]NotificationLease, 0, len(leases))
+		for _, lease := range leases {
+			result = append(result, lease)
+		}
+		return result
+	}
+	return nil
+}
+
 func (me *notificationManager) Register(cfg qdata.NotificationConfig) {
 	lease := NotificationLease{
 		Config:   cfg,
 		ExpireAt: time.Now().Add(LeaseDuration),
 	}
+
+	me.mu.Lock()
+	defer me.mu.Unlock()
 
 	if me.registeredNotifications[cfg.GetEntityId()] == nil {
 		me.registeredNotifications[cfg.GetEntityId()] = make(map[string]NotificationLease)
@@ -158,6 +183,9 @@ func (me *notificationManager) Register(cfg qdata.NotificationConfig) {
 }
 
 func (me *notificationManager) Unregister(cfg qdata.NotificationConfig) {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+
 	if me.registeredNotifications[cfg.GetEntityId()] == nil {
 		return
 	}
@@ -172,6 +200,7 @@ func (me *notificationManager) Unregister(cfg qdata.NotificationConfig) {
 func (me *notificationManager) ClearExpired() {
 	activeLeases := make(map[string]map[string]NotificationLease)
 
+	me.mu.RLock()
 	for entityId, leases := range me.registeredNotifications {
 		for token, lease := range leases {
 			if time.Now().After(lease.ExpireAt) {
@@ -185,6 +214,9 @@ func (me *notificationManager) ClearExpired() {
 			activeLeases[entityId][token] = lease
 		}
 	}
+	me.mu.RUnlock()
 
+	me.mu.Lock()
 	me.registeredNotifications = activeLeases
+	me.mu.Unlock()
 }
