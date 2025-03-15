@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rqure/qlib/pkg/app"
-	"github.com/rqure/qlib/pkg/auth"
-	"github.com/rqure/qlib/pkg/data"
-	"github.com/rqure/qlib/pkg/data/binding"
-	"github.com/rqure/qlib/pkg/data/query"
-	"github.com/rqure/qlib/pkg/log"
+	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qdata"
+	"github.com/rqure/qlib/pkg/qdata/qbinding"
+	"github.com/rqure/qlib/pkg/qdata/qquery"
+	"github.com/rqure/qlib/pkg/qlog"
 )
 
 const (
@@ -27,45 +27,45 @@ const (
 )
 
 type SessionWorker interface {
-	app.Worker
+	qapp.Worker
 	OnStoreConnected(context.Context)
 	OnStoreDisconnected()
 }
 
 type sessionWorker struct {
-	handle app.Handle
+	handle qapp.Handle
 
-	store            data.Store
+	store            qdata.Store
 	isStoreConnected bool
 
 	state SessionWorkerState
 
-	core         auth.Core
-	admin        auth.Admin
-	eventEmitter auth.EventEmitter
+	core         qauth.Core
+	admin        qauth.Admin
+	eventEmitter qauth.EventEmitter
 
-	initTimer      *time.Timer
-	fullSyncTimer  *time.Timer
-	eventPollTimer *time.Timer
+	initTimer      *time.Ticker
+	fullSyncTimer  *time.Ticker
+	eventPollTimer *time.Ticker
 }
 
-func NewSessionWorker(store data.Store) SessionWorker {
+func NewSessionWorker(store qdata.Store) SessionWorker {
 	return &sessionWorker{
 		store: store,
 		state: SessionWorkerState_Init,
 	}
 }
 
-func (me *sessionWorker) Init(ctx context.Context, handle app.Handle) {
-	me.handle = handle
-	me.core = auth.NewCore()
-	me.admin = auth.NewAdmin(me.core)
-	me.eventEmitter = auth.NewEventEmitter(me.core)
+func (me *sessionWorker) Init(ctx context.Context) {
+	me.handle = qapp.GetHandle(ctx)
+	me.core = qauth.NewCore()
+	me.admin = qauth.NewAdmin(me.core)
+	me.eventEmitter = qauth.NewEventEmitter(me.core)
 	me.eventEmitter.Signal().Connect(me.handleKeycloakEvent)
 
-	me.initTimer = time.NewTimer(initSyncInterval)
-	me.fullSyncTimer = time.NewTimer(fullSyncInterval)
-	me.eventPollTimer = time.NewTimer(eventPollInterval)
+	me.initTimer = time.NewTicker(initSyncInterval)
+	me.fullSyncTimer = time.NewTicker(fullSyncInterval)
+	me.eventPollTimer = time.NewTicker(eventPollInterval)
 }
 
 func (me *sessionWorker) Deinit(context.Context) {
@@ -86,14 +86,14 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 	case SessionWorkerState_Init:
 		select {
 		case <-me.initTimer.C:
-			log.Info("Ensuring setup of auth database...")
+			qlog.Info("Ensuring setup of auth database...")
 			err := me.admin.EnsureSetup(ctx)
 			if err != nil {
-				log.Error("Failed to ensure setup: %v", err)
+				qlog.Error("Failed to ensure setup: %v", err)
 				return
 			}
 
-			log.Info("Setup of auth database complete")
+			qlog.Info("Setup of auth database complete")
 			me.state = SessionWorkerState_Sync
 		default:
 			return
@@ -105,29 +105,29 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 
 		select {
 		case <-me.fullSyncTimer.C:
-			log.Info("Performing full sync...")
+			qlog.Trace("Performing full sync...")
 			me.performFullSync(ctx)
-			log.Info("Full sync complete")
+			qlog.Trace("Full sync complete")
 		case <-me.eventPollTimer.C:
-			log.Info("Processing new session events...")
+			qlog.Trace("Processing new session events...")
 			err := me.eventEmitter.ProcessNextBatch(ctx, session)
 			if err != nil {
-				log.Error("Failed to process all new session events: %v", err)
+				qlog.Error("Failed to process all new session events: %v", err)
 				return
 			}
-			log.Info("Processing new session events complete")
+			qlog.Trace("Processing new session events complete")
 		default:
 			return
 		}
 	default:
-		log.Panic("Unknown state")
+		qlog.Panic("Unknown state")
 	}
 }
 
 func (me *sessionWorker) OnStoreConnected(ctx context.Context) {
 	me.isStoreConnected = true
 
-	sessionControllers := query.New(me.store).
+	sessionControllers := qquery.New(me.store).
 		Select("LastEventTime").
 		From("SessionController").
 		Execute(ctx)
@@ -142,8 +142,8 @@ func (me *sessionWorker) OnStoreDisconnected() {
 	me.isStoreConnected = false
 }
 
-func (me *sessionWorker) handleKeycloakEvent(ctx context.Context, event auth.Event) {
-	sessionControllers := query.New(me.store).
+func (me *sessionWorker) handleKeycloakEvent(ctx context.Context, event qauth.Event) {
+	sessionControllers := qquery.New(me.store).
 		Select().
 		From("SessionController").
 		Execute(ctx)
@@ -155,14 +155,14 @@ func (me *sessionWorker) handleKeycloakEvent(ctx context.Context, event auth.Eve
 
 func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	// 1. Sync store users to Keycloak
-	storeUsers := query.New(me.store).
+	storeUsers := qquery.New(me.store).
 		Select("Name", "SourceOfTruth", "Parent").
 		From("User").
 		Execute(ctx)
 
 	usersFolderId := ""
 
-	storeUsersByName := make(map[string]data.EntityBinding)
+	storeUsersByName := make(map[string]qdata.EntityBinding)
 	keycloakUsersByName, err := me.admin.GetUsers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get Keycloak users: %w", err)
@@ -183,9 +183,9 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 		// Create or update user in Keycloak
 		username := user.GetField("Name").GetString()
 		if _, ok := keycloakUsersByName[username]; !ok {
-			log.Info("Creating QOS user '%s' in Keycloak", username)
+			qlog.Info("Creating QOS user '%s' in Keycloak", username)
 			if err := me.admin.CreateUser(ctx, username, username); err != nil {
-				log.Error("Failed to sync user %s to Keycloak: %v", username, err)
+				qlog.Error("Failed to sync user %s to Keycloak: %v", username, err)
 			}
 		}
 	}
@@ -197,10 +197,10 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	// 2. Sync Keycloak users to store
 	for _, kcUser := range keycloakUsersByName {
 		if user, ok := storeUsersByName[kcUser.GetUsername()]; !ok {
-			log.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
+			qlog.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
 			userId := me.store.CreateEntity(ctx, "User", usersFolderId, kcUser.GetUsername())
-			user = binding.NewEntity(ctx, me.store, userId)
-			user.DoMulti(ctx, func(userBinding data.EntityBinding) {
+			user = qbinding.NewEntity(ctx, me.store, userId)
+			user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
 				userBinding.GetField("SourceOfTruth").WriteChoice(ctx, "Keycloak")
 				userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
 				userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
@@ -211,8 +211,8 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 				userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
 			})
 		} else {
-			log.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
-			user.DoMulti(ctx, func(userBinding data.EntityBinding) {
+			qlog.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
+			user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
 				userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
 				userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
 				userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())

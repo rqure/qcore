@@ -3,10 +3,10 @@ package main
 import (
 	"os"
 
-	"github.com/rqure/qlib/pkg/app"
-	"github.com/rqure/qlib/pkg/app/workers"
-	"github.com/rqure/qlib/pkg/data/store"
-	"github.com/rqure/qlib/pkg/data/store/nats"
+	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qapp/qworkers"
+	"github.com/rqure/qlib/pkg/qdata/qstore"
+	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 )
 
 func getPostgresAddress() string {
@@ -28,20 +28,20 @@ func getNatsAddress() string {
 }
 
 func main() {
-	natsCore := nats.NewCore(nats.Config{Address: getNatsAddress()})
+	natsCore := qnats.NewCore(qnats.Config{Address: getNatsAddress()})
 	notificationManager := NewNotificationManager(natsCore)
 
-	s := store.New(
-		store.PersistOverPostgres(getPostgresAddress()),
-		func(store *store.Store) {
+	s := qstore.New(
+		qstore.PersistOverPostgres(getPostgresAddress()),
+		func(store *qstore.Store) {
 			natsCore.SetAuthProvider(store.AuthProvider)
-			store.MultiConnector.AddConnector(nats.NewConnector(natsCore))
-			store.ModifiableNotificationConsumer = nats.NewNotificationConsumer(natsCore)
+			store.MultiConnector.AddConnector(qnats.NewConnector(natsCore))
+			store.ModifiableNotificationConsumer = qnats.NewNotificationConsumer(natsCore)
 			store.ModifiableNotificationPublisher = notificationManager
 		},
 	)
 
-	storeWorker := workers.NewStore(s)
+	storeWorker := qworkers.NewStore(s)
 	modeManager := NewModeManager()
 
 	readWorker := NewReadWorker(s, natsCore, modeManager)
@@ -60,7 +60,7 @@ func main() {
 	storeWorker.Disconnected.Connect(notificationWorker.OnStoreDisconnected)
 	storeWorker.Disconnected.Connect(sessionWorker.OnStoreDisconnected)
 
-	a := app.NewApplication("core")
+	a := qapp.NewApplication("core")
 	a.AddWorker(sessionWorker)
 	a.AddWorker(storeWorker)
 	a.AddWorker(readWorker)

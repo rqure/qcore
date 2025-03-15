@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rqure/qlib/pkg/data"
-	"github.com/rqure/qlib/pkg/data/binding"
-	"github.com/rqure/qlib/pkg/data/entity"
-	"github.com/rqure/qlib/pkg/data/field"
-	"github.com/rqure/qlib/pkg/data/query"
-	"github.com/rqure/qlib/pkg/data/store"
-	"github.com/rqure/qlib/pkg/log"
-	"github.com/rqure/qlib/pkg/protobufs"
+	"github.com/rqure/qlib/pkg/qdata"
+	"github.com/rqure/qlib/pkg/qdata/qbinding"
+	"github.com/rqure/qlib/pkg/qdata/qentity"
+	"github.com/rqure/qlib/pkg/qdata/qfield"
+	"github.com/rqure/qlib/pkg/qdata/qquery"
+	"github.com/rqure/qlib/pkg/qdata/qstore"
+	"github.com/rqure/qlib/pkg/qlog"
+	"github.com/rqure/qlib/pkg/qprotobufs"
 )
 
 const (
@@ -59,84 +59,84 @@ func main() {
 	defer cancel()
 
 	if !qstoreDB && !keycloakDB {
-		log.Info("No database selected. Use -qstore or -keycloak flags.")
+		qlog.Info("No database selected. Use -qstore or -keycloak flags.")
 		return
 	}
 
 	if !create && !drop && !initialize {
-		log.Info("No operation selected. Use -create, -drop, or -initialize flags.")
+		qlog.Info("No operation selected. Use -create, -drop, or -initialize flags.")
 		return
 	}
 
 	if drop && !confirm {
-		log.Warn("WARNING: Drop operation requires confirmation. Add -confirm flag to proceed.")
+		qlog.Warn("WARNING: Drop operation requires confirmation. Add -confirm flag to proceed.")
 		return
 	}
 
 	// Connect to default PostgreSQL database for database operations
 	pool, err := pgxpool.New(ctx, postgresAddr)
 	if err != nil {
-		log.Panic("Failed to connect to PostgreSQL: %v", err)
+		qlog.Panic("Failed to connect to PostgreSQL: %v", err)
 	}
 	defer pool.Close()
 
 	// Verify connection
 	if err := pool.Ping(ctx); err != nil {
-		log.Panic("Failed to ping PostgreSQL: %v", err)
+		qlog.Panic("Failed to ping PostgreSQL: %v", err)
 	}
 
-	log.Info("Connected to PostgreSQL server")
+	qlog.Info("Connected to PostgreSQL server")
 
 	if qstoreDB {
 		if create {
-			log.Info("Creating qstore database...")
+			qlog.Info("Creating qstore database...")
 			if err := createQStoreDatabase(ctx, pool); err != nil {
-				log.Error("Failed to create qstore database: %v", err)
+				qlog.Error("Failed to create qstore database: %v", err)
 			} else {
-				log.Info("qstore database created successfully")
+				qlog.Info("qstore database created successfully")
 			}
 		}
 
 		if initialize {
-			log.Info("Initializing qstore database schema...")
+			qlog.Info("Initializing qstore database schema...")
 			if err := initializeQStoreSchema(ctx); err != nil {
-				log.Error("Failed to initialize qstore schema: %v", err)
+				qlog.Error("Failed to initialize qstore schema: %v", err)
 			} else {
-				log.Info("qstore schema initialized successfully")
+				qlog.Info("qstore schema initialized successfully")
 			}
 		}
 
 		if drop {
-			log.Info("Dropping qstore database...")
+			qlog.Info("Dropping qstore database...")
 			if err := dropQStoreDatabase(ctx, pool); err != nil {
-				log.Error("Failed to drop qstore database: %v", err)
+				qlog.Error("Failed to drop qstore database: %v", err)
 			} else {
-				log.Info("qstore database dropped successfully")
+				qlog.Info("qstore database dropped successfully")
 			}
 		}
 	}
 
 	if keycloakDB {
 		if create {
-			log.Info("Creating keycloak database...")
+			qlog.Info("Creating keycloak database...")
 			if err := createKeycloakDatabase(ctx, pool); err != nil {
-				log.Error("Failed to create keycloak database: %v", err)
+				qlog.Error("Failed to create keycloak database: %v", err)
 			} else {
-				log.Info("keycloak database created successfully")
+				qlog.Info("keycloak database created successfully")
 			}
 		}
 
 		if drop {
-			log.Info("Dropping keycloak database...")
+			qlog.Info("Dropping keycloak database...")
 			if err := dropKeycloakDatabase(ctx, pool); err != nil {
-				log.Error("Failed to drop keycloak database: %v", err)
+				qlog.Error("Failed to drop keycloak database: %v", err)
 			} else {
-				log.Info("keycloak database dropped successfully")
+				qlog.Info("keycloak database dropped successfully")
 			}
 		}
 	}
 
-	log.Info("Database operations completed")
+	qlog.Info("Database operations completed")
 }
 
 func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
@@ -148,21 +148,21 @@ func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if dbExists {
-		log.Info("qstore database already exists")
+		qlog.Info("qstore database already exists")
 	} else {
 		// Create qstore database
 		_, err = pool.Exec(ctx, "CREATE DATABASE qstore")
 		if err != nil {
 			return fmt.Errorf("failed to create qstore database: %w", err)
 		}
-		log.Info("qstore database created")
+		qlog.Info("qstore database created")
 	}
 
 	// Create qcore user if it doesn't exist
 	_, err = pool.Exec(ctx, `
 		DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'qcore') THEN
+			IF NOT EXISTS (SELECT FROM pg_cataqlog.pg_roles WHERE rolname = 'qcore') THEN
 				CREATE USER qcore WITH PASSWORD 'qcore';
 			ELSE
 				ALTER USER qcore WITH PASSWORD 'qcore';
@@ -173,14 +173,14 @@ func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("failed to create qcore user: %w", err)
 	}
-	log.Info("qcore user created/updated")
+	qlog.Info("qcore user created/updated")
 
 	// Grant privileges to qcore user on the qstore database
 	_, err = pool.Exec(ctx, "GRANT ALL PRIVILEGES ON DATABASE qstore TO qcore")
 	if err != nil {
 		return fmt.Errorf("failed to grant privileges to qcore user: %w", err)
 	}
-	log.Info("privileges granted to qcore user")
+	qlog.Info("privileges granted to qcore user")
 
 	// Connect to the qstore database specifically to grant schema permissions
 	qstoreConnString := strings.Replace(postgresAddr, "/postgres?", "/qstore?", 1)
@@ -195,14 +195,14 @@ func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("failed to grant schema permissions to qcore user: %w", err)
 	}
-	log.Info("schema permissions granted to qcore user")
+	qlog.Info("schema permissions granted to qcore user")
 
 	// Set qcore user as owner of public schema in qstore database
 	_, err = qstorePool.Exec(ctx, "ALTER SCHEMA public OWNER TO qcore")
 	if err != nil {
 		return fmt.Errorf("failed to set schema owner: %w", err)
 	}
-	log.Info("schema ownership set for qcore user")
+	qlog.Info("schema ownership set for qcore user")
 
 	return nil
 }
@@ -216,7 +216,7 @@ func dropQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if !dbExists {
-		log.Info("qstore database doesn't exist, nothing to drop")
+		qlog.Info("qstore database doesn't exist, nothing to drop")
 		return nil
 	}
 
@@ -228,7 +228,7 @@ func dropQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 		AND pid <> pg_backend_pid()
 	`)
 	if err != nil {
-		log.Warn("Failed to terminate connections to qstore database: %v", err)
+		qlog.Warn("Failed to terminate connections to qstore database: %v", err)
 		// Continue anyway
 	}
 
@@ -238,7 +238,7 @@ func dropQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to drop qstore database: %w", err)
 	}
 
-	log.Info("qstore database dropped")
+	qlog.Info("qstore database dropped")
 	return nil
 }
 
@@ -251,21 +251,21 @@ func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if dbExists {
-		log.Info("keycloak database already exists")
+		qlog.Info("keycloak database already exists")
 	} else {
 		// Create keycloak database
 		_, err = pool.Exec(ctx, "CREATE DATABASE keycloak")
 		if err != nil {
 			return fmt.Errorf("failed to create keycloak database: %w", err)
 		}
-		log.Info("keycloak database created")
+		qlog.Info("keycloak database created")
 	}
 
 	// Create keycloak user if it doesn't exist
 	_, err = pool.Exec(ctx, `
 		DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'keycloak') THEN
+			IF NOT EXISTS (SELECT FROM pg_cataqlog.pg_roles WHERE rolname = 'keycloak') THEN
 				CREATE USER keycloak WITH PASSWORD 'keycloak';
 			ELSE
 				ALTER USER keycloak WITH PASSWORD 'keycloak';
@@ -276,14 +276,14 @@ func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("failed to create keycloak user: %w", err)
 	}
-	log.Info("keycloak user created/updated")
+	qlog.Info("keycloak user created/updated")
 
 	// Grant privileges to keycloak user on the keycloak database
 	_, err = pool.Exec(ctx, "GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak")
 	if err != nil {
 		return fmt.Errorf("failed to grant privileges to keycloak user: %w", err)
 	}
-	log.Info("privileges granted to keycloak user on database")
+	qlog.Info("privileges granted to keycloak user on database")
 
 	// Connect to the keycloak database specifically to grant schema permissions
 	keycloakConnString := strings.Replace(postgresAddr, "/postgres?", "/keycloak?", 1)
@@ -298,14 +298,14 @@ func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("failed to grant schema permissions to keycloak user: %w", err)
 	}
-	log.Info("schema permissions granted to keycloak user")
+	qlog.Info("schema permissions granted to keycloak user")
 
 	// Set keycloak user as owner of public schema in keycloak database
 	_, err = keycloakPool.Exec(ctx, "ALTER SCHEMA public OWNER TO keycloak")
 	if err != nil {
 		return fmt.Errorf("failed to set schema owner: %w", err)
 	}
-	log.Info("schema ownership set for keycloak user")
+	qlog.Info("schema ownership set for keycloak user")
 
 	return nil
 }
@@ -319,7 +319,7 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if !dbExists {
-		log.Info("keycloak database doesn't exist, nothing to drop")
+		qlog.Info("keycloak database doesn't exist, nothing to drop")
 		return nil
 	}
 
@@ -331,7 +331,7 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 		AND pid <> pg_backend_pid()
 	`)
 	if err != nil {
-		log.Warn("Failed to terminate connections to keycloak database: %v", err)
+		qlog.Warn("Failed to terminate connections to keycloak database: %v", err)
 		// Continue anyway
 	}
 
@@ -341,7 +341,7 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to drop keycloak database: %w", err)
 	}
 
-	log.Info("keycloak database dropped")
+	qlog.Info("keycloak database dropped")
 	return nil
 }
 
@@ -352,8 +352,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 	qstoreConnString = strings.Replace(qstoreConnString, "postgres:postgres", "qcore:qcore", 1)
 
 	// Create a store instance to interact with the database
-	s := store.New(
-		store.PersistOverPostgres(qstoreConnString),
+	s := qstore.New(
+		qstore.PersistOverPostgres(qstoreConnString),
 	)
 
 	// Connect to the database
@@ -370,74 +370,74 @@ func initializeQStoreSchema(ctx context.Context) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	log.Info("Connected to qstore database")
+	qlog.Info("Connected to qstore database")
 
 	// Initialize the database if required
 	s.InitializeIfRequired(ctx)
 
 	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Root",
-		Fields: []*protobufs.DatabaseFieldSchema{
-			{Name: "SchemaUpdateTrigger", Type: field.Choice, ChoiceOptions: []string{"Trigger"}},
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: "SchemaUpdateTrigger", Type: qfield.Choice, ChoiceOptions: []string{"Trigger"}},
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "Folder",
-		Fields: []*protobufs.DatabaseFieldSchema{},
+		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "Permission",
-		Fields: []*protobufs.DatabaseFieldSchema{},
+		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "AreaOfResponsibility",
-		Fields: []*protobufs.DatabaseFieldSchema{},
+		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Role",
-		Fields: []*protobufs.DatabaseFieldSchema{
-			{Name: "Permissions", Type: field.EntityList},
-			{Name: "AreasOfResponsibilities", Type: field.EntityList},
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: "Permissions", Type: qfield.EntityList},
+			{Name: "AreasOfResponsibilities", Type: qfield.EntityList},
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "User",
-		Fields: []*protobufs.DatabaseFieldSchema{
-			{Name: "Roles", Type: field.EntityList},
-			{Name: "SelectedRole", Type: field.EntityReference},
-			{Name: "Permissions", Type: field.EntityList},
-			{Name: "TotalPermissions", Type: field.EntityList},
-			{Name: "AreasOfResponsibilities", Type: field.EntityList},
-			{Name: "SelectedAORs", Type: field.EntityReference},
-			{Name: "SourceOfTruth", Type: field.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}},
-			{Name: "KeycloakId", Type: field.String},
-			{Name: "Email", Type: field.String},
-			{Name: "FirstName", Type: field.String},
-			{Name: "LastName", Type: field.String},
-			{Name: "IsEmailVerified", Type: field.Bool},
-			{Name: "IsEnabled", Type: field.Bool},
-			{Name: "JSON", Type: field.String},
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: "Roles", Type: qfield.EntityList},
+			{Name: "SelectedRole", Type: qfield.EntityReference},
+			{Name: "Permissions", Type: qfield.EntityList},
+			{Name: "TotalPermissions", Type: qfield.EntityList},
+			{Name: "AreasOfResponsibilities", Type: qfield.EntityList},
+			{Name: "SelectedAORs", Type: qfield.EntityReference},
+			{Name: "SourceOfTruth", Type: qfield.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}},
+			{Name: "KeycloakId", Type: qfield.String},
+			{Name: "Email", Type: qfield.String},
+			{Name: "FirstName", Type: qfield.String},
+			{Name: "LastName", Type: qfield.String},
+			{Name: "IsEmailVerified", Type: qfield.Bool},
+			{Name: "IsEnabled", Type: qfield.Bool},
+			{Name: "JSON", Type: qfield.String},
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Client",
-		Fields: []*protobufs.DatabaseFieldSchema{
-			{Name: "Permissions", Type: field.EntityList},
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: "Permissions", Type: qfield.EntityList},
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, entity.FromSchemaPb(&protobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "SessionController",
-		Fields: []*protobufs.DatabaseFieldSchema{
-			{Name: "LastEventTime", Type: field.Timestamp},
-			{Name: "Logout", Type: field.EntityReference},
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: "LastEventTime", Type: qfield.Timestamp},
+			{Name: "Logout", Type: qfield.EntityReference},
 		},
 	}))
 
@@ -466,26 +466,26 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Clients")
 	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "core")
 
-	adminRole.DoMulti(ctx, func(role data.EntityBinding) {
+	adminRole.DoMulti(ctx, func(role qdata.EntityBinding) {
 		role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
 		role.GetField("AreasOfResponsibilities").WriteEntityList(ctx, []string{systemAor.GetId()})
 	})
 
-	adminUser.DoMulti(ctx, func(user data.EntityBinding) {
+	adminUser.DoMulti(ctx, func(user qdata.EntityBinding) {
 		user.GetField("Roles").WriteEntityList(ctx, []string{adminRole.GetId()})
 		user.GetField("SourceOfTruth").WriteChoice(ctx, "QOS")
 	})
 
-	coreClient.DoMulti(ctx, func(client data.EntityBinding) {
+	coreClient.DoMulti(ctx, func(client qdata.EntityBinding) {
 		client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
 	})
 
-	log.Info("Database schema initialization complete")
+	qlog.Info("Database schema initialization complete")
 	return nil
 }
 
 // Helper functions moved from init_store_worker
-func ensureEntitySchema(ctx context.Context, s data.Store, schema data.EntitySchema) {
+func ensureEntitySchema(ctx context.Context, s qdata.Store, schema qdata.EntitySchema) {
 	actualSchema := s.GetEntitySchema(ctx, schema.GetType())
 	if actualSchema != nil {
 		// Otherwise adding any missing fields to the actual schema
@@ -497,38 +497,38 @@ func ensureEntitySchema(ctx context.Context, s data.Store, schema data.EntitySch
 	}
 
 	s.SetEntitySchema(ctx, actualSchema)
-	log.Info("Ensured entity schema: %s", schema.GetType())
+	qlog.Info("Ensured entity schema: %s", schema.GetType())
 }
 
-func ensureEntity(ctx context.Context, store data.Store, entityType string, path ...string) data.EntityBinding {
+func ensureEntity(ctx context.Context, store qdata.Store, entityType string, path ...string) qdata.EntityBinding {
 	// The first element should be the root entity
 	if len(path) == 0 {
 		return nil
 	}
 
-	roots := query.New(store).
+	roots := qquery.New(store).
 		Select("Name").
 		From("Root").
 		Where("Name").Equals(path[0]).
 		Execute(ctx)
 
-	var currentNode data.EntityBinding
+	var currentNode qdata.EntityBinding
 	if len(roots) == 0 {
 		if entityType == "Root" {
-			log.Info("Creating root entity '%s'", path[0])
+			qlog.Info("Creating root entity '%s'", path[0])
 			rootId := store.CreateEntity(ctx, "Root", "", path[0])
-			currentNode = binding.NewEntity(ctx, store, rootId)
+			currentNode = qbinding.NewEntity(ctx, store, rootId)
 		} else {
-			log.Error("Root entity not found")
+			qlog.Error("Root entity not found")
 			return nil
 		}
 	} else {
 		currentNode = roots[0]
 
 		if len(roots) > 1 && len(path) > 1 {
-			log.Warn("Multiple root entities found: %v", roots)
+			qlog.Warn("Multiple root entities found: %v", roots)
 		} else if len(path) == 1 {
-			return binding.NewEntity(ctx, store, currentNode.GetId())
+			return qbinding.NewEntity(ctx, store, currentNode.GetId())
 		}
 	}
 
@@ -540,7 +540,7 @@ func ensureEntity(ctx context.Context, store data.Store, entityType string, path
 
 		found := false
 		for _, childId := range children {
-			child := binding.NewEntity(ctx, store, childId)
+			child := qbinding.NewEntity(ctx, store, childId)
 			if child.GetField("Name").ReadString(ctx) == name {
 				currentNode = child
 				found = true
@@ -549,19 +549,19 @@ func ensureEntity(ctx context.Context, store data.Store, entityType string, path
 		}
 
 		if !found && i == lastIndex {
-			log.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
+			qlog.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
 			entityId := store.CreateEntity(ctx, entityType, currentNode.GetId(), name)
-			return binding.NewEntity(ctx, store, entityId)
+			return qbinding.NewEntity(ctx, store, entityId)
 		} else if !found {
-			log.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
+			qlog.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
 			return nil
 		}
 	}
 
 	if currentNode == nil {
-		log.Error("Current node is nil: %s", strings.Join(path, "/"))
+		qlog.Error("Current node is nil: %s", strings.Join(path, "/"))
 		return nil
 	}
 
-	return binding.NewEntity(ctx, store, currentNode.GetId())
+	return qbinding.NewEntity(ctx, store, currentNode.GetId())
 }

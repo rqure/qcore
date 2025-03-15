@@ -4,36 +4,36 @@ import (
 	"context"
 	"time"
 
-	"github.com/rqure/qlib/pkg/data"
-	"github.com/rqure/qlib/pkg/data/field"
-	"github.com/rqure/qlib/pkg/data/query"
-	"github.com/rqure/qlib/pkg/data/request"
-	qnats "github.com/rqure/qlib/pkg/data/store/nats"
-	"github.com/rqure/qlib/pkg/log"
-	"github.com/rqure/qlib/pkg/protobufs"
+	"github.com/rqure/qlib/pkg/qdata"
+	"github.com/rqure/qlib/pkg/qdata/qfield"
+	"github.com/rqure/qlib/pkg/qdata/qquery"
+	"github.com/rqure/qlib/pkg/qdata/qrequest"
+	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
+	"github.com/rqure/qlib/pkg/qlog"
+	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
 )
 
 const LeaseDuration = 1 * time.Minute
 
 type NotificationLease struct {
-	Config   data.NotificationConfig
+	Config   qdata.NotificationConfig
 	ExpireAt time.Time
 }
 
 type NotificationManager interface {
-	data.ModifiableNotificationPublisher
+	qdata.ModifiableNotificationPublisher
 
-	Register(data.NotificationConfig)
-	Unregister(data.NotificationConfig)
+	Register(qdata.NotificationConfig)
+	Unregister(qdata.NotificationConfig)
 
 	ClearExpired()
 }
 
 type notificationManager struct {
 	core          qnats.Core
-	entityManager data.EntityManager
-	fieldOperator data.FieldOperator
+	entityManager qdata.EntityManager
+	fieldOperator qdata.FieldOperator
 
 	registeredNotifications map[string]map[string]NotificationLease
 }
@@ -45,28 +45,28 @@ func NewNotificationManager(core qnats.Core) NotificationManager {
 	}
 }
 
-func (p *notificationManager) SetEntityManager(em data.EntityManager) {
+func (p *notificationManager) SetEntityManager(em qdata.EntityManager) {
 	p.entityManager = em
 }
 
-func (p *notificationManager) SetFieldOperator(fo data.FieldOperator) {
+func (p *notificationManager) SetFieldOperator(fo qdata.FieldOperator) {
 	p.fieldOperator = fo
 }
 
-func (p *notificationManager) PublishNotifications(ctx context.Context, curr data.Request, prev data.Request) {
+func (p *notificationManager) PublishNotifications(ctx context.Context, curr qdata.Request, prev qdata.Request) {
 	// Failed to read old value (it may not exist initially)
 	if !prev.IsSuccessful() {
-		log.Trace("Failed to read old value: %v", prev)
+		qlog.Trace("Failed to read old value: %v", prev)
 		return
 	}
 
-	changed := !proto.Equal(field.ToAnyPb(curr.GetValue()), field.ToAnyPb(prev.GetValue()))
+	changed := !proto.Equal(qfield.ToAnyPb(curr.GetValue()), qfield.ToAnyPb(prev.GetValue()))
 
-	resolver := query.NewIndirectionResolver(p.entityManager, p.fieldOperator)
+	resolver := qquery.NewIndirectionResolver(p.entityManager, p.fieldOperator)
 	indirectEntity, indirectField := resolver.Resolve(ctx, curr.GetEntityId(), curr.GetFieldName())
 
 	if indirectField == "" || indirectEntity == "" {
-		log.Error("Failed to resolve indirection: %v", curr)
+		qlog.Error("Failed to resolve indirection: %v", curr)
 		return
 	}
 
@@ -76,18 +76,18 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 			continue
 		}
 
-		notifMsg := &protobufs.DatabaseNotification{
+		notifMsg := &qprotobufs.DatabaseNotification{
 			Token:    cfg.GetToken(),
-			Current:  field.ToFieldPb(field.FromRequest(curr)),
-			Previous: field.ToFieldPb(field.FromRequest(prev)),
-			Context:  []*protobufs.DatabaseField{},
+			Current:  qfield.ToFieldPb(qfield.FromRequest(curr)),
+			Previous: qfield.ToFieldPb(qfield.FromRequest(prev)),
+			Context:  []*qprotobufs.DatabaseField{},
 		}
 
 		for _, ctxField := range cfg.GetContextFields() {
-			ctxReq := request.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
+			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
 			p.fieldOperator.Read(ctx, ctxReq)
 			if ctxReq.IsSuccessful() {
-				notifMsg.Context = append(notifMsg.Context, field.ToFieldPb(field.FromRequest(ctxReq)))
+				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
 			}
 		}
 
@@ -105,7 +105,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 
 	fetchedEntity := p.entityManager.GetEntity(ctx, indirectEntity)
 	if fetchedEntity == nil {
-		log.Error("Failed to get entity: %v (indirect=%v)", curr.GetEntityId(), indirectEntity)
+		qlog.Error("Failed to get entity: %v (indirect=%v)", curr.GetEntityId(), indirectEntity)
 		return
 	}
 
@@ -116,18 +116,18 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 			continue
 		}
 
-		notifMsg := &protobufs.DatabaseNotification{
+		notifMsg := &qprotobufs.DatabaseNotification{
 			Token:    cfg.GetToken(),
-			Current:  field.ToFieldPb(field.FromRequest(curr)),
-			Previous: field.ToFieldPb(field.FromRequest(prev)),
-			Context:  []*protobufs.DatabaseField{},
+			Current:  qfield.ToFieldPb(qfield.FromRequest(curr)),
+			Previous: qfield.ToFieldPb(qfield.FromRequest(prev)),
+			Context:  []*qprotobufs.DatabaseField{},
 		}
 
 		for _, ctxField := range cfg.GetContextFields() {
-			ctxReq := request.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
+			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
 			p.fieldOperator.Read(ctx, ctxReq)
 			if ctxReq.IsSuccessful() {
-				notifMsg.Context = append(notifMsg.Context, field.ToFieldPb(field.FromRequest(ctxReq)))
+				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
 			}
 		}
 
@@ -144,7 +144,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr dat
 	}
 }
 
-func (p *notificationManager) Register(cfg data.NotificationConfig) {
+func (p *notificationManager) Register(cfg qdata.NotificationConfig) {
 	lease := NotificationLease{
 		Config:   cfg,
 		ExpireAt: time.Now().Add(LeaseDuration),
@@ -157,7 +157,7 @@ func (p *notificationManager) Register(cfg data.NotificationConfig) {
 	p.registeredNotifications[cfg.GetEntityId()][cfg.GetToken()] = lease
 }
 
-func (p *notificationManager) Unregister(cfg data.NotificationConfig) {
+func (p *notificationManager) Unregister(cfg qdata.NotificationConfig) {
 	if p.registeredNotifications[cfg.GetEntityId()] == nil {
 		return
 	}
