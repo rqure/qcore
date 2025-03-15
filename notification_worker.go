@@ -16,6 +16,7 @@ import (
 
 type NotificationWorker interface {
 	qapp.Worker
+	OnBeforeStoreConnected()
 	OnStoreConnected(context.Context)
 	OnStoreDisconnected()
 }
@@ -47,13 +48,16 @@ func (w *notificationWorker) DoWork(context.Context) {
 	w.notifManager.ClearExpired()
 }
 
-func (w *notificationWorker) OnStoreConnected(ctx context.Context) {
-	w.isStoreConnected = true
-
+func (w *notificationWorker) OnBeforeStoreConnected() {
 	if w.modeManager.HasModes(ModeWrite) {
 		w.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationRegistrationSubject(), w.handleNotificationRequest)
 	}
 }
+
+func (w *notificationWorker) OnStoreConnected(context.Context) {
+	w.isStoreConnected = true
+}
+
 func (w *notificationWorker) OnStoreDisconnected() {
 	w.isStoreConnected = false
 }

@@ -49,10 +49,11 @@ func main() {
 	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
 	sessionWorker := NewSessionWorker(s)
 
+	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)
+
 	// Connect store signals
 	storeWorker.Connected.Connect(readWorker.OnStoreConnected)
 	storeWorker.Connected.Connect(writeWorker.OnStoreConnected)
-	storeWorker.Connected.Connect(notificationWorker.OnStoreConnected)
 	storeWorker.Connected.Connect(sessionWorker.OnStoreConnected)
 
 	storeWorker.Disconnected.Connect(readWorker.OnStoreDisconnected)
