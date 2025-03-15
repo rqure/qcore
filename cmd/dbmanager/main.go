@@ -464,7 +464,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 	adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
 
 	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Clients")
-	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "core")
+	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
 
 	adminRole.DoMulti(ctx, func(role qdata.EntityBinding) {
 		role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
