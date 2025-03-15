@@ -162,7 +162,7 @@ func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err = pool.Exec(ctx, `
 		DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT FROM pg_cataqlog.pg_roles WHERE rolname = 'qcore') THEN
+			IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'qcore') THEN
 				CREATE USER qcore WITH PASSWORD 'qcore';
 			ELSE
 				ALTER USER qcore WITH PASSWORD 'qcore';
@@ -265,7 +265,7 @@ func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err = pool.Exec(ctx, `
 		DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT FROM pg_cataqlog.pg_roles WHERE rolname = 'keycloak') THEN
+			IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'keycloak') THEN
 				CREATE USER keycloak WITH PASSWORD 'keycloak';
 			ELSE
 				ALTER USER keycloak WITH PASSWORD 'keycloak';

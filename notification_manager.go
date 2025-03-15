@@ -45,15 +45,15 @@ func NewNotificationManager(core qnats.Core) NotificationManager {
 	}
 }
 
-func (p *notificationManager) SetEntityManager(em qdata.EntityManager) {
-	p.entityManager = em
+func (me *notificationManager) SetEntityManager(em qdata.EntityManager) {
+	me.entityManager = em
 }
 
-func (p *notificationManager) SetFieldOperator(fo qdata.FieldOperator) {
-	p.fieldOperator = fo
+func (me *notificationManager) SetFieldOperator(fo qdata.FieldOperator) {
+	me.fieldOperator = fo
 }
 
-func (p *notificationManager) PublishNotifications(ctx context.Context, curr qdata.Request, prev qdata.Request) {
+func (me *notificationManager) PublishNotifications(ctx context.Context, curr qdata.Request, prev qdata.Request) {
 	// Failed to read old value (it may not exist initially)
 	if !prev.IsSuccessful() {
 		qlog.Trace("Failed to read old value: %v", prev)
@@ -62,7 +62,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 
 	changed := !proto.Equal(qfield.ToAnyPb(curr.GetValue()), qfield.ToAnyPb(prev.GetValue()))
 
-	resolver := qquery.NewIndirectionResolver(p.entityManager, p.fieldOperator)
+	resolver := qquery.NewIndirectionResolver(me.entityManager, me.fieldOperator)
 	indirectEntity, indirectField := resolver.Resolve(ctx, curr.GetEntityId(), curr.GetFieldName())
 
 	if indirectField == "" || indirectEntity == "" {
@@ -70,7 +70,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 		return
 	}
 
-	for _, lease := range p.registeredNotifications[curr.GetEntityId()] {
+	for _, lease := range me.registeredNotifications[curr.GetEntityId()] {
 		cfg := lease.Config
 		if cfg.GetNotifyOnChange() && !changed {
 			continue
@@ -85,7 +85,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 
 		for _, ctxField := range cfg.GetContextFields() {
 			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
-			p.fieldOperator.Read(ctx, ctxReq)
+			me.fieldOperator.Read(ctx, ctxReq)
 			if ctxReq.IsSuccessful() {
 				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
 			}
@@ -95,21 +95,21 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 		if cfg.IsDistributed() {
 			// For distributed notifications, use a queue subject
 			// This ensures only one subscriber receives the notification
-			p.core.Publish(p.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+			me.core.Publish(me.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
 		} else {
 			// For non-distributed notifications, use the regular subject
 			// All subscribers will receive the notification
-			p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+			me.core.Publish(me.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
 		}
 	}
 
-	fetchedEntity := p.entityManager.GetEntity(ctx, indirectEntity)
+	fetchedEntity := me.entityManager.GetEntity(ctx, indirectEntity)
 	if fetchedEntity == nil {
 		qlog.Error("Failed to get entity: %v (indirect=%v)", curr.GetEntityId(), indirectEntity)
 		return
 	}
 
-	for _, lease := range p.registeredNotifications[fetchedEntity.GetType()] {
+	for _, lease := range me.registeredNotifications[fetchedEntity.GetType()] {
 		cfg := lease.Config
 
 		if cfg.GetNotifyOnChange() && !changed {
@@ -125,7 +125,7 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 
 		for _, ctxField := range cfg.GetContextFields() {
 			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
-			p.fieldOperator.Read(ctx, ctxReq)
+			me.fieldOperator.Read(ctx, ctxReq)
 			if ctxReq.IsSuccessful() {
 				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
 			}
@@ -135,44 +135,44 @@ func (p *notificationManager) PublishNotifications(ctx context.Context, curr qda
 		if cfg.IsDistributed() {
 			// For distributed notifications, use a queue subject
 			// This ensures only one subscriber receives the notification
-			p.core.Publish(p.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+			me.core.Publish(me.core.GetKeyGenerator().GetDistributedNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
 		} else {
 			// For non-distributed notifications, use the regular subject
 			// All subscribers will receive the notification
-			p.core.Publish(p.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
+			me.core.Publish(me.core.GetKeyGenerator().GetNotificationGroupSubject(cfg.GetServiceId()), notifMsg)
 		}
 	}
 }
 
-func (p *notificationManager) Register(cfg qdata.NotificationConfig) {
+func (me *notificationManager) Register(cfg qdata.NotificationConfig) {
 	lease := NotificationLease{
 		Config:   cfg,
 		ExpireAt: time.Now().Add(LeaseDuration),
 	}
 
-	if p.registeredNotifications[cfg.GetEntityId()] == nil {
-		p.registeredNotifications[cfg.GetEntityId()] = make(map[string]NotificationLease)
+	if me.registeredNotifications[cfg.GetEntityId()] == nil {
+		me.registeredNotifications[cfg.GetEntityId()] = make(map[string]NotificationLease)
 	}
 
-	p.registeredNotifications[cfg.GetEntityId()][cfg.GetToken()] = lease
+	me.registeredNotifications[cfg.GetEntityId()][cfg.GetToken()] = lease
 }
 
-func (p *notificationManager) Unregister(cfg qdata.NotificationConfig) {
-	if p.registeredNotifications[cfg.GetEntityId()] == nil {
+func (me *notificationManager) Unregister(cfg qdata.NotificationConfig) {
+	if me.registeredNotifications[cfg.GetEntityId()] == nil {
 		return
 	}
 
-	delete(p.registeredNotifications[cfg.GetEntityId()], cfg.GetToken())
+	delete(me.registeredNotifications[cfg.GetEntityId()], cfg.GetToken())
 
-	if len(p.registeredNotifications[cfg.GetEntityId()]) == 0 {
-		delete(p.registeredNotifications, cfg.GetEntityId())
+	if len(me.registeredNotifications[cfg.GetEntityId()]) == 0 {
+		delete(me.registeredNotifications, cfg.GetEntityId())
 	}
 }
 
-func (p *notificationManager) ClearExpired() {
+func (me *notificationManager) ClearExpired() {
 	activeLeases := make(map[string]map[string]NotificationLease)
 
-	for entityId, leases := range p.registeredNotifications {
+	for entityId, leases := range me.registeredNotifications {
 		for token, lease := range leases {
 			if time.Now().After(lease.ExpireAt) {
 				continue
@@ -186,5 +186,5 @@ func (p *notificationManager) ClearExpired() {
 		}
 	}
 
-	p.registeredNotifications = activeLeases
+	me.registeredNotifications = activeLeases
 }
