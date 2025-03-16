@@ -28,15 +28,15 @@ const (
 
 type SessionWorker interface {
 	qapp.Worker
-	OnStoreConnected(context.Context)
-	OnStoreDisconnected()
+	OnReady()
+	OnNotReady()
 }
 
 type sessionWorker struct {
 	handle qapp.Handle
 
-	store            qdata.Store
-	isStoreConnected bool
+	store   qdata.Store
+	isReady bool
 
 	state SessionWorkerState
 
@@ -75,6 +75,10 @@ func (me *sessionWorker) Deinit(context.Context) {
 }
 
 func (me *sessionWorker) DoWork(ctx context.Context) {
+	if !me.isReady {
+		return
+	}
+
 	session := me.admin.Session(ctx)
 	if session.IsValid(ctx) {
 		if session.PastHalfLife(ctx) {
@@ -99,10 +103,6 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 			return
 		}
 	case SessionWorkerState_Sync:
-		if !me.isStoreConnected {
-			return
-		}
-
 		select {
 		case <-me.fullSyncTimer.C:
 			qlog.Trace("Performing full sync...")
@@ -124,22 +124,24 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 	}
 }
 
-func (me *sessionWorker) OnStoreConnected(ctx context.Context) {
-	me.isStoreConnected = true
+func (me *sessionWorker) OnReady() {
+	me.handle.DoInMainThread(func(ctx context.Context) {
+		me.isReady = true
 
-	sessionControllers := qquery.New(me.store).
-		Select("LastEventTime").
-		From("SessionController").
-		Execute(ctx)
+		sessionControllers := qquery.New(me.store).
+			Select("LastEventTime").
+			From("SessionController").
+			Execute(ctx)
 
-	for _, sessionController := range sessionControllers {
-		lastEventTime := sessionController.GetField("LastEventTime").GetTimestamp()
-		me.eventEmitter.SetLastEventTime(lastEventTime)
-	}
+		for _, sessionController := range sessionControllers {
+			lastEventTime := sessionController.GetField("LastEventTime").GetTimestamp()
+			me.eventEmitter.SetLastEventTime(lastEventTime)
+		}
+	})
 }
 
-func (me *sessionWorker) OnStoreDisconnected() {
-	me.isStoreConnected = false
+func (me *sessionWorker) OnNotReady() {
+	me.isReady = false
 }
 
 func (me *sessionWorker) handleKeycloakEvent(ctx context.Context, event qauth.Event) {

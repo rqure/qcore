@@ -21,15 +21,15 @@ import (
 
 type WriteWorker interface {
 	qapp.Worker
-	OnStoreConnected(context.Context)
-	OnStoreDisconnected()
+	OnReady()
+	OnNotReady()
 }
 
 type writeWorker struct {
-	store            qdata.Store
-	natsCore         qnats.Core
-	isStoreConnected bool
-	modeManager      ModeManager
+	store       qdata.Store
+	natsCore    qnats.Core
+	isReady     bool
+	modeManager ModeManager
 
 	handle qapp.Handle
 }
@@ -44,16 +44,16 @@ func NewWriteWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeMana
 
 func (w *writeWorker) Deinit(context.Context) {}
 func (w *writeWorker) DoWork(context.Context) {}
-func (w *writeWorker) OnStoreConnected(ctx context.Context) {
-	w.isStoreConnected = true
+func (w *writeWorker) OnReady() {
+	w.isReady = true
 
 	if w.modeManager.HasModes(ModeWrite) {
 		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetWriteSubject(), w.handleWriteRequest)
 	}
 }
 
-func (w *writeWorker) OnStoreDisconnected() {
-	w.isStoreConnected = false
+func (w *writeWorker) OnNotReady() {
+	w.isReady = false
 }
 
 func (w *writeWorker) Init(ctx context.Context) {
@@ -94,7 +94,7 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
@@ -118,7 +118,7 @@ func (w *writeWorker) handleDeleteEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
@@ -141,7 +141,7 @@ func (w *writeWorker) handleSetEntitySchema(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
 		w.sendResponse(msg, rsp)
@@ -164,7 +164,7 @@ func (w *writeWorker) handleRestoreSnapshot(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
 		w.sendResponse(msg, rsp)
@@ -186,7 +186,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		w.sendResponse(msg, rsp)
 		return

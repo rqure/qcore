@@ -20,16 +20,16 @@ import (
 
 type ReadWorker interface {
 	qapp.Worker
-	OnStoreConnected(context.Context)
-	OnStoreDisconnected()
+	OnReady()
+	OnNotReady()
 }
 
 type readWorker struct {
-	store            qdata.Store
-	natsCore         qnats.Core
-	isStoreConnected bool
-	modeManager      ModeManager
-	handle           qapp.Handle
+	store       qdata.Store
+	natsCore    qnats.Core
+	isReady     bool
+	modeManager ModeManager
+	handle      qapp.Handle
 }
 
 func NewReadWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManager) ReadWorker {
@@ -89,7 +89,7 @@ func (w *readWorker) handleGetEntity(ctx context.Context, msg *nats.Msg, apiMsg 
 		return
 	}
 
-	if !w.isStoreConnected {
+	if !w.isReady {
 		qlog.Error("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigGetEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
@@ -233,7 +233,7 @@ func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *n
 		return
 	}
 
-	rsp.Connected = w.isStoreConnected
+	rsp.Connected = w.isReady
 
 	w.sendResponse(msg, rsp)
 }
@@ -341,14 +341,14 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	}
 }
 
-func (w *readWorker) OnStoreConnected(context.Context) {
-	w.isStoreConnected = true
+func (w *readWorker) OnReady() {
+	w.isReady = true
 
 	if w.modeManager.HasModes(ModeRead) {
 		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetReadSubject(), w.handleReadRequest)
 	}
 }
 
-func (w *readWorker) OnStoreDisconnected() {
-	w.isStoreConnected = false
+func (w *readWorker) OnNotReady() {
+	w.isReady = false
 }

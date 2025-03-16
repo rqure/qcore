@@ -430,6 +430,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 		Name: "Client",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "Permissions", Type: qfield.EntityList},
+			{Name: "LogLevel", Type: qfield.Choice, ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
+			{Name: "QLibLogLevel", Type: qfield.Choice, ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
 		},
 	}))
 

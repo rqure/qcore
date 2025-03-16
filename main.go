@@ -49,23 +49,24 @@ func main() {
 	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
 	sessionWorker := NewSessionWorker(s)
 	readinessWorker := qworkers.NewReadiness()
-	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker))
+	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, s))
 
 	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)
 
 	// Connect store signals
-	readinessWorker.BecameReady().Connect(readWorker.OnStoreConnected)
-	readinessWorker.BecameReady().Connect(writeWorker.OnStoreConnected)
-	readinessWorker.BecameReady().Connect(sessionWorker.OnStoreConnected)
+	readinessWorker.BecameReady().Connect(readWorker.OnReady)
+	readinessWorker.BecameReady().Connect(writeWorker.OnReady)
+	readinessWorker.BecameReady().Connect(sessionWorker.OnReady)
 
-	readinessWorker.BecameUnready().Connect(readWorker.OnStoreDisconnected)
-	readinessWorker.BecameUnready().Connect(writeWorker.OnStoreDisconnected)
-	readinessWorker.BecameUnready().Connect(sessionWorker.OnStoreDisconnected)
+	readinessWorker.BecameNotReady().Connect(readWorker.OnNotReady)
+	readinessWorker.BecameNotReady().Connect(writeWorker.OnNotReady)
+	readinessWorker.BecameNotReady().Connect(sessionWorker.OnNotReady)
 
 	a := qapp.NewApplication("qcore")
 	a.AddWorker(sessionWorker)
 	a.AddWorker(storeWorker)
+	a.AddWorker(readinessWorker)
 	a.AddWorker(readWorker)
 	a.AddWorker(writeWorker)
 	a.AddWorker(notificationWorker)
