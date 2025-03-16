@@ -10,6 +10,7 @@ import (
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
+	"github.com/rqure/qlib/pkg/qss"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -17,7 +18,7 @@ import (
 
 type NotificationWorker interface {
 	qapp.Worker
-	OnBeforeStoreConnected()
+	OnBeforeStoreConnected(qss.VoidType)
 }
 
 type notificationWorker struct {
@@ -46,7 +47,7 @@ func (me *notificationWorker) DoWork(context.Context) {
 	me.notifManager.ClearExpired()
 }
 
-func (me *notificationWorker) OnBeforeStoreConnected() {
+func (me *notificationWorker) OnBeforeStoreConnected(qss.VoidType) {
 	if me.modeManager.HasModes(ModeWrite) {
 		me.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationRegistrationSubject(), me.handleNotificationRequest)
 	}

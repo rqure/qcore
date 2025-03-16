@@ -28,8 +28,8 @@ const (
 
 type SessionWorker interface {
 	qapp.Worker
-	OnReady()
-	OnNotReady()
+	OnReady(context.Context)
+	OnNotReady(context.Context)
 }
 
 type sessionWorker struct {
@@ -124,34 +124,32 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 	}
 }
 
-func (me *sessionWorker) OnReady() {
-	me.handle.DoInMainThread(func(ctx context.Context) {
-		me.isReady = true
+func (me *sessionWorker) OnReady(ctx context.Context) {
+	me.isReady = true
 
-		sessionControllers := qquery.New(me.store).
-			Select("LastEventTime").
-			From("SessionController").
-			Execute(ctx)
-
-		for _, sessionController := range sessionControllers {
-			lastEventTime := sessionController.GetField("LastEventTime").GetTimestamp()
-			me.eventEmitter.SetLastEventTime(lastEventTime)
-		}
-	})
-}
-
-func (me *sessionWorker) OnNotReady() {
-	me.isReady = false
-}
-
-func (me *sessionWorker) handleKeycloakEvent(ctx context.Context, event qauth.Event) {
 	sessionControllers := qquery.New(me.store).
-		Select().
+		Select("LastEventTime").
 		From("SessionController").
 		Execute(ctx)
 
 	for _, sessionController := range sessionControllers {
-		sessionController.GetField("LastEventTime").WriteTimestamp(ctx, time.Now())
+		lastEventTime := sessionController.GetField("LastEventTime").GetTimestamp()
+		me.eventEmitter.SetLastEventTime(lastEventTime)
+	}
+}
+
+func (me *sessionWorker) OnNotReady(context.Context) {
+	me.isReady = false
+}
+
+func (me *sessionWorker) handleKeycloakEvent(e qauth.EmittedEvent) {
+	sessionControllers := qquery.New(me.store).
+		Select().
+		From("SessionController").
+		Execute(e.Ctx)
+
+	for _, sessionController := range sessionControllers {
+		sessionController.GetField("LastEventTime").WriteTimestamp(e.Ctx, time.Now())
 	}
 }
 

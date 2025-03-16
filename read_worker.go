@@ -20,8 +20,8 @@ import (
 
 type ReadWorker interface {
 	qapp.Worker
-	OnReady()
-	OnNotReady()
+	OnReady(context.Context)
+	OnNotReady(context.Context)
 }
 
 type readWorker struct {
@@ -341,7 +341,7 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	}
 }
 
-func (w *readWorker) OnReady() {
+func (w *readWorker) OnReady(context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeRead) {
@@ -349,6 +349,6 @@ func (w *readWorker) OnReady() {
 	}
 }
 
-func (w *readWorker) OnNotReady() {
+func (w *readWorker) OnNotReady(context.Context) {
 	w.isReady = false
 }

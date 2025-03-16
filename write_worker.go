@@ -21,8 +21,8 @@ import (
 
 type WriteWorker interface {
 	qapp.Worker
-	OnReady()
-	OnNotReady()
+	OnReady(context.Context)
+	OnNotReady(context.Context)
 }
 
 type writeWorker struct {
@@ -44,7 +44,7 @@ func NewWriteWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeMana
 
 func (w *writeWorker) Deinit(context.Context) {}
 func (w *writeWorker) DoWork(context.Context) {}
-func (w *writeWorker) OnReady() {
+func (w *writeWorker) OnReady(context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeWrite) {
@@ -52,7 +52,7 @@ func (w *writeWorker) OnReady() {
 	}
 }
 
-func (w *writeWorker) OnNotReady() {
+func (w *writeWorker) OnNotReady(context.Context) {
 	w.isReady = false
 }
 
