@@ -6,28 +6,54 @@ import (
 	"time"
 
 	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qapp/qworkers"
 	"github.com/rqure/qlib/pkg/qauth"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qbinding"
 	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qlog"
+	"github.com/rqure/qlib/pkg/qss"
 )
 
 const (
-	initSyncInterval  = 5 * time.Second
+	initSyncInterval  = 1 * time.Minute
 	fullSyncInterval  = 1 * time.Minute
 	eventPollInterval = 1 * time.Second
 )
 
-type SessionWorkerState string
+type SessionReadyCriteria struct {
+	isAuthReady bool
+}
 
-const (
-	SessionWorkerState_Init SessionWorkerState = "Init"
-	SessionWorkerState_Sync SessionWorkerState = "Sync"
-)
+func (me *SessionReadyCriteria) IsReady() bool {
+	return me.isAuthReady
+}
+
+func (me *SessionReadyCriteria) OnAuthReady(qss.VoidType) {
+	me.isAuthReady = true
+}
+
+func (me *SessionReadyCriteria) OnAuthNotReady(qss.VoidType) {
+	me.isAuthReady = false
+}
+
+func NewSessionReadyCriteria(w SessionWorker) qworkers.ReadinessCriteria {
+	c := &SessionReadyCriteria{
+		isAuthReady: false,
+	}
+
+	w.AuthReady().Connect(c.OnAuthReady)
+	w.AuthNotReady().Connect(c.OnAuthNotReady)
+
+	return c
+}
 
 type SessionWorker interface {
 	qapp.Worker
+
+	AuthReady() qss.Signal[qss.VoidType]
+	AuthNotReady() qss.Signal[qss.VoidType]
+
 	OnReady(context.Context)
 	OnNotReady(context.Context)
 }
@@ -35,10 +61,12 @@ type SessionWorker interface {
 type sessionWorker struct {
 	handle qapp.Handle
 
+	authReady        qss.Signal[qss.VoidType]
+	authNotReady     qss.Signal[qss.VoidType]
+	isAdminAuthReady bool
+
 	store   qdata.Store
 	isReady bool
-
-	state SessionWorkerState
 
 	core         qauth.Core
 	admin        qauth.Admin
@@ -51,8 +79,9 @@ type sessionWorker struct {
 
 func NewSessionWorker(store qdata.Store) SessionWorker {
 	return &sessionWorker{
-		store: store,
-		state: SessionWorkerState_Init,
+		store:        store,
+		authReady:    qss.New[qss.VoidType](),
+		authNotReady: qss.New[qss.VoidType](),
 	}
 }
 
@@ -66,6 +95,8 @@ func (me *sessionWorker) Init(ctx context.Context) {
 	me.initTimer = time.NewTicker(initSyncInterval)
 	me.fullSyncTimer = time.NewTicker(fullSyncInterval)
 	me.eventPollTimer = time.NewTicker(eventPollInterval)
+
+	me.performInit(ctx)
 }
 
 func (me *sessionWorker) Deinit(context.Context) {
@@ -75,53 +106,64 @@ func (me *sessionWorker) Deinit(context.Context) {
 }
 
 func (me *sessionWorker) DoWork(ctx context.Context) {
+	session := me.admin.Session(ctx)
+	if session.IsValid(ctx) {
+		if session.PastHalfLife(ctx) {
+			err := session.Refresh(ctx)
+			if err != nil {
+				me.setAuthReadiness(ctx, false, fmt.Sprintf("failed to refresh session: %v", err))
+				return
+			}
+		}
+	} else {
+		me.setAuthReadiness(ctx, false, "session is not valid")
+		return
+	}
+
+	select {
+	case <-me.initTimer.C:
+		me.performInit(ctx)
+	default:
+		break
+	}
+
 	if !me.isReady {
 		return
 	}
 
-	session := me.admin.Session(ctx)
-	if session.IsValid(ctx) {
-		if session.PastHalfLife(ctx) {
-			session.Refresh(ctx)
-		}
-	}
-
-	switch me.state {
-	case SessionWorkerState_Init:
-		select {
-		case <-me.initTimer.C:
-			qlog.Info("Ensuring setup of auth database...")
-			err := me.admin.EnsureSetup(ctx)
-			if err != nil {
-				qlog.Error("Failed to ensure setup: %v", err)
-				return
-			}
-
-			qlog.Info("Setup of auth database complete")
-			me.state = SessionWorkerState_Sync
-		default:
-			return
-		}
-	case SessionWorkerState_Sync:
-		select {
-		case <-me.fullSyncTimer.C:
-			qlog.Trace("Performing full sync...")
-			me.performFullSync(ctx)
-			qlog.Trace("Full sync complete")
-		case <-me.eventPollTimer.C:
-			qlog.Trace("Processing new session events...")
-			err := me.eventEmitter.ProcessNextBatch(ctx, session)
-			if err != nil {
-				qlog.Error("Failed to process all new session events: %v", err)
-				return
-			}
-			qlog.Trace("Processing new session events complete")
-		default:
-			return
-		}
+	select {
+	case <-me.fullSyncTimer.C:
+		qlog.Trace("Performing full sync...")
+		me.performFullSync(ctx)
+		qlog.Trace("Full sync completed")
 	default:
-		qlog.Panic("Unknown state")
+		break
 	}
+
+	select {
+	case <-me.eventPollTimer.C:
+		qlog.Trace("Processing new session events...")
+		err := me.eventEmitter.ProcessNextBatch(ctx, session)
+		if err != nil {
+			qlog.Warn("Failed to process all new session events: %v", err)
+		}
+		qlog.Trace("Processing new session events completed")
+	default:
+		break
+	}
+
+}
+
+func (me *sessionWorker) performInit(ctx context.Context) {
+	qlog.Info("Ensuring setup of auth database...")
+	err := me.admin.EnsureSetup(ctx)
+	if err != nil {
+		qlog.Warn("Failed to ensure setup: %v", err)
+		me.setAuthReadiness(ctx, false, fmt.Sprintf("failed to ensure setup: %v", err))
+	}
+
+	qlog.Info("Setup of auth database complete")
+	me.setAuthReadiness(ctx, true, "")
 }
 
 func (me *sessionWorker) OnReady(ctx context.Context) {
@@ -225,4 +267,28 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (me *sessionWorker) setAuthReadiness(ctx context.Context, ready bool, reason string) {
+	if me.isAdminAuthReady == ready {
+		return
+	}
+
+	me.isAdminAuthReady = ready
+
+	if ready {
+		qlog.Info("Authentication status changed to [READY]")
+		me.authReady.Emit(qss.Void)
+	} else {
+		qlog.Warn("Authentication status changed to [NOT READY] with reason: %s", reason)
+		me.authNotReady.Emit(qss.Void)
+	}
+}
+
+func (me *sessionWorker) AuthReady() qss.Signal[qss.VoidType] {
+	return me.authReady
+}
+
+func (me *sessionWorker) AuthNotReady() qss.Signal[qss.VoidType] {
+	return me.authNotReady
 }
