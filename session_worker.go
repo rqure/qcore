@@ -61,6 +61,8 @@ type SessionWorker interface {
 type sessionWorker struct {
 	handle qapp.Handle
 
+	modeManager ModeManager
+
 	authReady        qss.Signal[qss.VoidType]
 	authNotReady     qss.Signal[qss.VoidType]
 	isAdminAuthReady bool
@@ -77,8 +79,9 @@ type sessionWorker struct {
 	eventPollTimer *time.Ticker
 }
 
-func NewSessionWorker(store qdata.Store) SessionWorker {
+func NewSessionWorker(store qdata.Store, modeManager ModeManager) SessionWorker {
 	return &sessionWorker{
+		modeManager:  modeManager,
 		store:        store,
 		authReady:    qss.New[qss.VoidType](),
 		authNotReady: qss.New[qss.VoidType](),
@@ -87,6 +90,11 @@ func NewSessionWorker(store qdata.Store) SessionWorker {
 
 func (me *sessionWorker) Init(ctx context.Context) {
 	me.handle = qapp.GetHandle(ctx)
+
+	if !me.modeManager.HasModes(ModeWrite) {
+		return
+	}
+
 	me.core = qauth.NewCore()
 	me.admin = qauth.NewAdmin(me.core)
 	me.eventEmitter = qauth.NewEventEmitter(me.core)
@@ -100,12 +108,20 @@ func (me *sessionWorker) Init(ctx context.Context) {
 }
 
 func (me *sessionWorker) Deinit(context.Context) {
+	if !me.modeManager.HasModes(ModeWrite) {
+		return
+	}
+
 	me.initTimer.Stop()
 	me.fullSyncTimer.Stop()
 	me.eventPollTimer.Stop()
 }
 
 func (me *sessionWorker) DoWork(ctx context.Context) {
+	if !me.modeManager.HasModes(ModeWrite) {
+		return
+	}
+
 	session := me.admin.Session(ctx)
 	if session.IsValid(ctx) {
 		if session.PastHalfLife(ctx) {

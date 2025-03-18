@@ -47,7 +47,7 @@ func main() {
 	readWorker := NewReadWorker(s, natsCore, modeManager)
 	writeWorker := NewWriteWorker(s, natsCore, modeManager)
 	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
-	sessionWorker := NewSessionWorker(s)
+	sessionWorker := NewSessionWorker(s, modeManager)
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, s))
