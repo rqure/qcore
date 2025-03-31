@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/nats-io/nats.go v1.39.1
-	github.com/rqure/qlib v0.1.46
+	github.com/rqure/qlib v0.1.47
 	google.golang.org/protobuf v1.36.5
 )
 

@@ -8,8 +8,8 @@ import (
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
 	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qbinding"
 	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qss"
@@ -59,7 +59,7 @@ type SessionWorker interface {
 }
 
 type sessionWorker struct {
-	handle qapp.Handle
+	handle qcontext.Handle
 
 	modeManager ModeManager
 
@@ -67,7 +67,7 @@ type sessionWorker struct {
 	authNotReady     qss.Signal[qss.VoidType]
 	isAdminAuthReady bool
 
-	store   qdata.Store
+	store   *qdata.Store
 	isReady bool
 
 	core         qauth.Core
@@ -79,7 +79,7 @@ type sessionWorker struct {
 	eventPollTimer *time.Ticker
 }
 
-func NewSessionWorker(store qdata.Store, modeManager ModeManager) SessionWorker {
+func NewSessionWorker(store *qdata.Store, modeManager ModeManager) SessionWorker {
 	return &sessionWorker{
 		modeManager:  modeManager,
 		store:        store,
@@ -89,7 +89,7 @@ func NewSessionWorker(store qdata.Store, modeManager ModeManager) SessionWorker 
 }
 
 func (me *sessionWorker) Init(ctx context.Context) {
-	me.handle = qapp.GetHandle(ctx)
+	me.handle = qcontext.GetHandle(ctx)
 
 	if !me.modeManager.HasModes(ModeWrite) {
 		return
@@ -220,12 +220,12 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 
 	usersFolderId := ""
 
-	storeUsersByName := make(map[string]qdata.EntityBinding)
 	keycloakUsersByName, err := me.admin.GetUsers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get Keycloak users: %w", err)
 	}
 
+	iterator := me.store.PrepareQuery("SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
 	for _, user := range storeUsers {
 		storeUsersByName[user.GetField("Name").GetString()] = user
 

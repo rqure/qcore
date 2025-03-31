@@ -5,10 +5,10 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qentity"
 	"github.com/rqure/qlib/pkg/qdata/qquery"
-	"github.com/rqure/qlib/pkg/qdata/qrequest"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -25,14 +25,14 @@ type ReadWorker interface {
 }
 
 type readWorker struct {
-	store       qdata.Store
-	natsCore    qnats.Core
+	store       *qdata.Store
+	natsCore    qnats.NatsCore
 	isReady     bool
 	modeManager ModeManager
-	handle      qapp.Handle
+	handle      qcontext.Handle
 }
 
-func NewReadWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManager) ReadWorker {
+func NewReadWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager) ReadWorker {
 	return &readWorker{
 		store:       store,
 		natsCore:    natsCore,
@@ -41,7 +41,7 @@ func NewReadWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManag
 }
 
 func (w *readWorker) Init(ctx context.Context) {
-	w.handle = qapp.GetHandle(ctx)
+	w.handle = qcontext.GetHandle(ctx)
 }
 
 func (w *readWorker) Deinit(context.Context) {}
@@ -96,7 +96,7 @@ func (w *readWorker) handleGetEntity(ctx context.Context, msg *nats.Msg, apiMsg 
 		return
 	}
 
-	ent := w.store.GetEntity(ctx, req.Id)
+	ent := w.store.GetEntity(ctx, qdata.EntityId(req.Id))
 	if ent == nil {
 		qlog.Error("Could not get entity")
 		rsp.Status = qprotobufs.ApiConfigGetEntityResponse_FAILURE
@@ -104,7 +104,7 @@ func (w *readWorker) handleGetEntity(ctx context.Context, msg *nats.Msg, apiMsg 
 		return
 	}
 
-	rsp.Entity = qentity.ToEntityPb(ent)
+	rsp.Entity = ent.AsEntityPb()
 	rsp.Status = qprotobufs.ApiConfigGetEntityResponse_SUCCESS
 
 	w.sendResponse(msg, rsp)
@@ -136,14 +136,14 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 		return
 	}
 
-	schema := w.store.GetEntitySchema(ctx, req.Type) // Changed from req.EntityType to req.Type
+	schema := w.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
 	if schema == nil {
 		qlog.Error("Schema not found")
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	pbSchema := qentity.ToSchemaPb(schema)
+	pbSchema := schema.AsEntitySchemaPb()
 	rsp.Schema = pbSchema
 
 	w.sendResponse(msg, rsp)
@@ -160,10 +160,10 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 		return
 	}
 
-	root := w.store.FindEntities(ctx, "Root")
+	iterator := w.store.FindEntities("Root")
 
-	for _, id := range root {
-		rsp.RootId = id
+	for iterator.Next(ctx) {
+		rsp.RootId = string(iterator.Get())
 	}
 
 	w.sendResponse(msg, rsp)
@@ -201,7 +201,11 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 		return
 	}
 
-	exists := w.store.FieldExists(ctx, req.FieldName, req.EntityType)
+	exists := w.store.FieldExists(
+		ctx,
+		qdata.EntityType(req.EntityType),
+		qdata.FieldType(req.FieldName))
+
 	rsp.Exists = exists
 
 	w.sendResponse(msg, rsp)
@@ -217,7 +221,7 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 		return
 	}
 
-	exists := w.store.EntityExists(ctx, req.EntityId)
+	exists := w.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
 	rsp.Exists = exists
 
 	w.sendResponse(msg, rsp)
@@ -255,13 +259,15 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 		return
 	}
 
-	reqs := []qdata.Request{}
+	reqs := []*qdata.Request{}
 	for _, r := range req.Requests {
-		reqs = append(reqs, qrequest.FromPb(r))
+		reqs = append(reqs, new(qdata.Request).FromRequestPb(r))
 	}
 
 	qlog.Info("Read request: %v", req.Requests)
-	if client := w.store.AuthClient(ctx); client != nil {
+	clientProvider := qcontext.GetClientProvider[qauth.Client](ctx)
+	client := clientProvider.Client(ctx)
+	if client != nil {
 		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
 
 		if !accessorSession.IsValid(ctx) {
@@ -275,29 +281,27 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 			return
 		}
 
-		users := qquery.New(w.store).
-			Select().
-			From("User").
-			Where("Name").Equals(accessorName).
-			Execute(ctx)
+		found := false
+		iterator := w.store.PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName)
+		for iterator.Next(ctx) {
+			user := iterator.Get()
 
-		for _, user := range users {
-			authorizer := qstore.NewFieldAuthorizer(user.GetId(), w.store)
+			authorizer := qstore.NewFieldAuthorizer(user.EntityId, w.store)
 			w.store.Read(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
+
+			found = true
 
 			// Break after first user
 			break
 		}
 
-		if len(users) == 0 {
-			clients := qquery.New(w.store).
-				Select().
-				From("Client").
-				Where("Name").Equals(accessorName).
-				Execute(ctx)
+		if !found {
+			iterator := w.store.PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName)
 
-			for _, client := range clients {
-				authorizer := qstore.NewFieldAuthorizer(client.GetId(), w.store)
+			for iterator.Next(ctx) {
+				client := iterator.Get()
+
+				authorizer := qstore.NewFieldAuthorizer(client.EntityId, w.store)
 				w.store.Read(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
 
 				// Break after first client
@@ -341,11 +345,14 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	}
 }
 
-func (w *readWorker) OnReady(context.Context) {
+func (w *readWorker) OnReady(ctx context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeRead) {
-		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetReadSubject(), w.handleReadRequest)
+		w.natsCore.QueueSubscribe(
+			w.natsCore.GetKeyGenerator().GetReadSubject(),
+			qcontext.GetAppName(ctx),
+			w.handleReadRequest)
 	}
 }
 

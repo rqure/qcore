@@ -2,9 +2,11 @@ package main
 
 import (
 	"os"
+	"time"
 
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
+	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 )
@@ -28,16 +30,25 @@ func getNatsAddress() string {
 }
 
 func main() {
-	natsCore := qnats.NewCore(qnats.Config{Address: getNatsAddress()})
+	natsCore := qnats.NewCore(qnats.NatsConfig{Address: getNatsAddress()})
 	notificationManager := NewNotificationManager(natsCore)
 
-	s := qstore.New(
-		qstore.PersistOverPostgres(getPostgresAddress()),
-		func(store *qstore.Store) {
-			natsCore.SetAuthProvider(store.AuthProvider)
-			store.MultiConnector.AddConnector(qnats.NewConnector(natsCore))
-			store.ModifiableNotificationConsumer = qnats.NewNotificationConsumer(natsCore)
-			store.ModifiableNotificationPublisher = notificationManager
+	s := new(qdata.Store).Init(
+		qstore.PersistOverPostgres(
+			getPostgresAddress(),
+			qstore.WithMemcachedCache("memcached:11211", 5*time.Minute)),
+		func(store *qdata.Store) {
+			if store.StoreConnector == nil {
+				store.StoreConnector = qstore.NewMultiConnector()
+			}
+
+			if connector, ok := store.StoreConnector.(qstore.MultiConnector); ok {
+				connector.AddConnector(qnats.NewConnector(natsCore))
+			} else {
+				store.StoreConnector = qnats.NewConnector(natsCore)
+			}
+
+			store.StoreNotifier = qnats.NewStoreNotifier(natsCore)
 		},
 	)
 

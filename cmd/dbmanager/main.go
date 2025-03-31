@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qbinding"
-	"github.com/rqure/qlib/pkg/qdata/qentity"
 	"github.com/rqure/qlib/pkg/qdata/qfield"
 	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
@@ -352,9 +351,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 	qstoreConnString = strings.Replace(qstoreConnString, "postgres:postgres", "qcore:qcore", 1)
 
 	// Create a store instance to interact with the database
-	s := qstore.New(
-		qstore.PersistOverPostgres(qstoreConnString),
-	)
+	s := new(qdata.Store).Init(
+		qstore.PersistOverPostgres(qstoreConnString))
 
 	// Connect to the database
 	s.Connect(ctx)
@@ -363,7 +361,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 	// Wait for connection to establish
 	startTime := time.Now()
 	timeout := 30 * time.Second
-	for !s.IsConnected(ctx) {
+	for !s.IsConnected() {
 		if time.Since(startTime) > timeout {
 			return fmt.Errorf("timeout waiting for database connection")
 		}
@@ -373,32 +371,32 @@ func initializeQStoreSchema(ctx context.Context) error {
 	qlog.Info("Connected to qstore database")
 
 	// Initialize the database if required
-	s.InitializeIfRequired(ctx)
+	s.InitializeSchema(ctx)
 
 	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Root",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "SchemaUpdateTrigger", Type: qfield.Choice, ChoiceOptions: []string{"Trigger"}},
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "Folder",
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "Permission",
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name:   "AreaOfResponsibility",
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Role",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "Permissions", Type: qfield.EntityList},
@@ -406,7 +404,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "User",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "Roles", Type: qfield.EntityList},
@@ -426,7 +424,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Client",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "Permissions", Type: qfield.EntityList},
@@ -435,7 +433,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 		},
 	}))
 
-	ensureEntitySchema(ctx, s, qentity.FromSchemaPb(&qprotobufs.DatabaseEntitySchema{
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "SessionController",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
 			{Name: "LastEventTime", Type: qfield.Timestamp},
@@ -468,41 +466,43 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Clients")
 	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
 
-	adminRole.DoMulti(ctx, func(role qdata.EntityBinding) {
-		role.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
-		role.GetField("AreasOfResponsibilities").WriteEntityList(ctx, []string{systemAor.GetId()})
-	})
+	adminRole.Field("Permissions").Value.SetEntityList([]qdata.EntityId{systemPermission.EntityId})
+	adminRole.Field("AreasOfResponsibilities").Value.SetEntityList([]qdata.EntityId{systemAor.EntityId})
+	s.Write(ctx,
+		adminRole.Field("Permissions").AsWriteRequest(),
+		adminRole.Field("AreasOfResponsibilities").AsWriteRequest())
 
-	adminUser.DoMulti(ctx, func(user qdata.EntityBinding) {
-		user.GetField("Roles").WriteEntityList(ctx, []string{adminRole.GetId()})
-		user.GetField("SourceOfTruth").WriteChoice(ctx, "QOS")
-	})
+	adminUser.Field("Roles").Value.SetEntityList([]qdata.EntityId{adminRole.EntityId})
+	adminUser.Field("SourceOfTruth").Value.SetChoice(0)
+	s.Write(ctx,
+		adminUser.Field("Roles").AsWriteRequest(),
+		adminUser.Field("SourceOfTruth").AsWriteRequest())
 
-	coreClient.DoMulti(ctx, func(client qdata.EntityBinding) {
-		client.GetField("Permissions").WriteEntityList(ctx, []string{systemPermission.GetId()})
-	})
+	coreClient.Field("Permissions").Value.SetEntityList([]qdata.EntityId{systemPermission.EntityId})
+	s.Write(ctx,
+		coreClient.Field("Permissions").AsWriteRequest())
 
 	qlog.Info("Database schema initialization complete")
 	return nil
 }
 
 // Helper functions moved from init_store_worker
-func ensureEntitySchema(ctx context.Context, s qdata.Store, schema qdata.EntitySchema) {
-	actualSchema := s.GetEntitySchema(ctx, schema.GetType())
+func ensureEntitySchema(ctx context.Context, s *qdata.Store, schema *qdata.EntitySchema) {
+	actualSchema := s.GetEntitySchema(ctx, schema.EntityType)
 	if actualSchema != nil {
 		// Otherwise adding any missing fields to the actual schema
-		for _, field := range schema.GetFields() {
-			actualSchema.SetField(field.GetFieldName(), field)
+		for _, field := range schema.Fields {
+			actualSchema.Fields[field.FieldType] = field
 		}
 	} else {
 		actualSchema = schema
 	}
 
 	s.SetEntitySchema(ctx, actualSchema)
-	qlog.Info("Ensured entity schema: %s", schema.GetType())
+	qlog.Info("Ensured entity schema: %s", schema.EntityType)
 }
 
-func ensureEntity(ctx context.Context, store qdata.Store, entityType string, path ...string) qdata.EntityBinding {
+func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.EntityType, path ...string) *qdata.Entity {
 	// The first element should be the root entity
 	if len(path) == 0 {
 		return nil
@@ -514,7 +514,7 @@ func ensureEntity(ctx context.Context, store qdata.Store, entityType string, pat
 		Where("Name").Equals(path[0]).
 		Execute(ctx)
 
-	var currentNode qdata.EntityBinding
+	var currentNode *qdata.Entity
 	if len(roots) == 0 {
 		if entityType == "Root" {
 			qlog.Info("Creating root entity '%s'", path[0])
@@ -530,7 +530,7 @@ func ensureEntity(ctx context.Context, store qdata.Store, entityType string, pat
 		if len(roots) > 1 && len(path) > 1 {
 			qlog.Warn("Multiple root entities found: %v", roots)
 		} else if len(path) == 1 {
-			return qbinding.NewEntity(ctx, store, currentNode.GetId())
+			return currentNode
 		}
 	}
 
@@ -538,7 +538,7 @@ func ensureEntity(ctx context.Context, store qdata.Store, entityType string, pat
 	// Return early if the intermediate entities are not found
 	lastIndex := len(path) - 2
 	for i, name := range path[1:] {
-		children := currentNode.GetField("Children").ReadEntityList(ctx).GetEntities()
+		children := currentNode.Field("Children").ReadEntityList(ctx).GetEntities()
 
 		found := false
 		for _, childId := range children {

@@ -43,6 +43,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rqure/qlib v0.1.46 h1:QsuNzXKu2uUimct2vePT7wD/z2njWRzQ9wbJnSmnlzY=
 github.com/rqure/qlib v0.1.46/go.mod h1:DOUx9DE//75aiNI9jlvwXMJ9E83aL0K76dL33BcdTG4=
+github.com/rqure/qlib v0.1.47 h1:Psfu3faU3Ji2veJ/D3s4r/dx2wRLbMqHkwFaDm2Hgek=
+github.com/rqure/qlib v0.1.47/go.mod h1:d+T7MKd5K6tEkgbouocL1ApJNn9lWJJ0lYSBYd2pp3Y=
 github.com/segmentio/ksuid v1.0.4 h1:sBo2BdShXjmcugAMwjugoGUdUV0pcxY5mW4xKRn3v4c=
 github.com/segmentio/ksuid v1.0.4/go.mod h1:/XUiZBD3kVx5SmUOl55voK5yeAbBNNIed+2O73XgrPE=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

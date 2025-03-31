@@ -5,12 +5,12 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qnotify"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
-	"github.com/rqure/qlib/pkg/qss"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -18,18 +18,18 @@ import (
 
 type NotificationWorker interface {
 	qapp.Worker
-	OnBeforeStoreConnected(qss.VoidType)
+	OnBeforeStoreConnected(qdata.ConnectedArgs)
 }
 
 type notificationWorker struct {
-	store        qdata.Store
-	natsCore     qnats.Core
+	store        *qdata.Store
+	natsCore     qnats.NatsCore
 	modeManager  ModeManager
 	notifManager NotificationManager
-	handle       qapp.Handle
+	handle       qcontext.Handle
 }
 
-func NewNotificationWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManager, notifManager NotificationManager) NotificationWorker {
+func NewNotificationWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager, notifManager NotificationManager) NotificationWorker {
 	return &notificationWorker{
 		store:        store,
 		natsCore:     natsCore,
@@ -39,7 +39,7 @@ func NewNotificationWorker(store qdata.Store, natsCore qnats.Core, modeManager M
 }
 
 func (me *notificationWorker) Init(ctx context.Context) {
-	me.handle = qapp.GetHandle(ctx)
+	me.handle = qcontext.GetHandle(ctx)
 }
 
 func (me *notificationWorker) Deinit(context.Context) {}
@@ -47,9 +47,12 @@ func (me *notificationWorker) DoWork(context.Context) {
 	me.notifManager.ClearExpired()
 }
 
-func (me *notificationWorker) OnBeforeStoreConnected(qss.VoidType) {
+func (me *notificationWorker) OnBeforeStoreConnected(args qdata.ConnectedArgs) {
 	if me.modeManager.HasModes(ModeWrite) {
-		me.natsCore.QueueSubscribe(qnats.NewKeyGenerator().GetNotificationRegistrationSubject(), me.handleNotificationRequest)
+		me.natsCore.QueueSubscribe(
+			qnats.NewKeyGenerator().GetNotificationRegistrationSubject(),
+			qcontext.GetAppName(args.Ctx),
+			me.handleNotificationRequest)
 	}
 }
 
@@ -60,11 +63,13 @@ func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
 		return
 	}
 
-	if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}) {
-		me.handleRegisterNotification(msg, &apiMsg)
-	} else if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}) {
-		me.handleUnregisterNotification(msg, &apiMsg)
-	}
+	me.handle.DoInMainThread(func(context.Context) {
+		if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}) {
+			me.handleRegisterNotification(msg, &apiMsg)
+		} else if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}) {
+			me.handleUnregisterNotification(msg, &apiMsg)
+		}
+	})
 }
 
 func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {

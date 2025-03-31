@@ -5,11 +5,9 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qentity"
-	"github.com/rqure/qlib/pkg/qdata/qquery"
-	"github.com/rqure/qlib/pkg/qdata/qrequest"
-	"github.com/rqure/qlib/pkg/qdata/qsnapshot"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -26,15 +24,15 @@ type WriteWorker interface {
 }
 
 type writeWorker struct {
-	store       qdata.Store
-	natsCore    qnats.Core
+	store       *qdata.Store
+	natsCore    qnats.NatsCore
 	isReady     bool
 	modeManager ModeManager
 
-	handle qapp.Handle
+	handle qcontext.Handle
 }
 
-func NewWriteWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeManager) WriteWorker {
+func NewWriteWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager) WriteWorker {
 	return &writeWorker{
 		store:       store,
 		natsCore:    natsCore,
@@ -44,11 +42,14 @@ func NewWriteWorker(store qdata.Store, natsCore qnats.Core, modeManager ModeMana
 
 func (w *writeWorker) Deinit(context.Context) {}
 func (w *writeWorker) DoWork(context.Context) {}
-func (w *writeWorker) OnReady(context.Context) {
+func (w *writeWorker) OnReady(ctx context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeWrite) {
-		w.natsCore.QueueSubscribe(w.natsCore.GetKeyGenerator().GetWriteSubject(), w.handleWriteRequest)
+		w.natsCore.QueueSubscribe(
+			w.natsCore.GetKeyGenerator().GetWriteSubject(),
+			qcontext.GetAppName(ctx),
+			w.handleWriteRequest)
 	}
 }
 
@@ -57,7 +58,7 @@ func (w *writeWorker) OnNotReady(context.Context) {
 }
 
 func (w *writeWorker) Init(ctx context.Context) {
-	w.handle = qapp.GetHandle(ctx)
+	w.handle = qcontext.GetHandle(ctx)
 }
 
 func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
@@ -101,8 +102,13 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
-	id := w.store.CreateEntity(ctx, req.Type, req.ParentId, req.Name)
-	rsp.Id = id
+	id := w.store.CreateEntity(
+		ctx,
+		qdata.EntityType(req.Type),
+		qdata.EntityId(req.ParentId),
+		req.Name)
+
+	rsp.Id = id.AsString()
 	rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -125,7 +131,7 @@ func (w *writeWorker) handleDeleteEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
-	w.store.DeleteEntity(ctx, req.Id)
+	w.store.DeleteEntity(ctx, qdata.EntityId(req.Id))
 	rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -148,7 +154,7 @@ func (w *writeWorker) handleSetEntitySchema(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	w.store.SetEntitySchema(ctx, qentity.FromSchemaPb(req.Schema))
+	w.store.SetEntitySchema(ctx, new(qdata.EntitySchema).FromEntitySchemaPb(req.Schema))
 	rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -171,7 +177,7 @@ func (w *writeWorker) handleRestoreSnapshot(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	w.store.RestoreSnapshot(ctx, qsnapshot.FromPb(req.Snapshot))
+	w.store.RestoreSnapshot(ctx, new(qdata.Snapshot).FromSnapshotPb(req.Snapshot))
 	rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -198,13 +204,15 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
-	reqs := []qdata.Request{}
+	reqs := []*qdata.Request{}
 	for _, r := range req.Requests {
-		reqs = append(reqs, qrequest.FromPb(r))
+		reqs = append(reqs, new(qdata.Request).FromRequestPb(r))
 	}
 
 	qlog.Info("Write request: %v", req.Requests)
-	if client := w.store.AuthClient(ctx); client != nil {
+	clientProvider := qcontext.GetClientProvider[qauth.Client](ctx)
+	client := clientProvider.Client(ctx)
+	if client != nil {
 		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
 
 		if !accessorSession.IsValid(ctx) {
@@ -218,29 +226,27 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 			return
 		}
 
-		users := qquery.New(w.store).
-			Select().
-			From("User").
-			Where("Name").Equals(accessorName).
-			Execute(ctx)
+		found := false
+		iterator := w.store.PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName)
+		for iterator.Next(ctx) {
+			user := iterator.Get()
 
-		for _, user := range users {
-			authorizer := qstore.NewFieldAuthorizer(user.GetId(), w.store)
+			authorizer := qstore.NewFieldAuthorizer(user.EntityId, w.store)
 			w.store.Write(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
+
+			found = true
 
 			// Break after first user
 			break
 		}
 
-		if len(users) == 0 {
-			clients := qquery.New(w.store).
-				Select().
-				From("Client").
-				Where("Name").Equals(accessorName).
-				Execute(ctx)
+		if !found {
+			iterator := w.store.PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName)
 
-			for _, client := range clients {
-				authorizer := qstore.NewFieldAuthorizer(client.GetId(), w.store)
+			for iterator.Next(ctx) {
+				client := iterator.Get()
+
+				authorizer := qstore.NewFieldAuthorizer(client.EntityId, w.store)
 				w.store.Write(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
 
 				// Break after first client

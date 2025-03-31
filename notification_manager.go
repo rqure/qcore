@@ -1,18 +1,12 @@
 package main
 
 import (
-	"context"
-	"sync"
 	"time"
 
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qfield"
-	"github.com/rqure/qlib/pkg/qdata/qquery"
-	"github.com/rqure/qlib/pkg/qdata/qrequest"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
-	"google.golang.org/protobuf/proto"
 )
 
 const LeaseDuration = 1 * time.Minute
@@ -23,8 +17,6 @@ type NotificationLease struct {
 }
 
 type NotificationManager interface {
-	qdata.ModifiableNotificationPublisher
-
 	Register(qdata.NotificationConfig)
 	Unregister(qdata.NotificationConfig)
 
@@ -32,49 +24,38 @@ type NotificationManager interface {
 }
 
 type notificationManager struct {
-	core          qnats.Core
-	entityManager qdata.EntityManager
-	fieldOperator qdata.FieldOperator
+	core qnats.NatsCore
 
-	mu                      sync.RWMutex
 	registeredNotifications map[string]map[string]NotificationLease
+
+	store *qdata.Store
 }
 
-func NewNotificationManager(core qnats.Core) NotificationManager {
+func NewNotificationManager(core qnats.NatsCore) NotificationManager {
 	return &notificationManager{
 		core:                    core,
 		registeredNotifications: make(map[string]map[string]NotificationLease),
 	}
 }
 
-func (me *notificationManager) SetEntityManager(em qdata.EntityManager) {
-	me.entityManager = em
-}
-
-func (me *notificationManager) SetFieldOperator(fo qdata.FieldOperator) {
-	me.fieldOperator = fo
-}
-
-func (me *notificationManager) PublishNotifications(ctx context.Context, curr qdata.Request, prev qdata.Request) {
+func (me *notificationManager) PublishNotifications(args qdata.PublishNotificationArgs) {
 	// Failed to read old value (it may not exist initially)
-	if !prev.IsSuccessful() {
-		qlog.Trace("Failed to read old value: %v", prev)
+	if !args.Prev.Success {
+		qlog.Trace("Failed to read old value: %v", args.Prev)
 		return
 	}
 
-	changed := !proto.Equal(qfield.ToAnyPb(curr.GetValue()), qfield.ToAnyPb(prev.GetValue()))
+	changed := args.Prev.Value != args.Curr.Value
 
-	resolver := qquery.NewIndirectionResolver(me.entityManager, me.fieldOperator)
-	indirectEntity, indirectField := resolver.Resolve(ctx, curr.GetEntityId(), curr.GetFieldName())
+	resolver := qdata.NewIndirectionResolver(me.store)
+	indirectEntity, indirectField := resolver.Resolve(args.Ctx, args.Curr.EntityId, args.Curr.FieldType)
 
 	if indirectField == "" || indirectEntity == "" {
-		qlog.Error("Failed to resolve indirection: %v", curr)
+		qlog.Error("Failed to resolve indirection: %v", args.Curr)
 		return
 	}
 
-	me.mu.RLock()
-	leases := me.getEntityLeases(curr.GetEntityId())
-	me.mu.RUnlock()
+	leases := me.getEntityLeases(args.Curr.EntityId.AsString())
 
 	for _, lease := range leases {
 		cfg := lease.Config
@@ -84,16 +65,19 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 
 		notifMsg := &qprotobufs.DatabaseNotification{
 			Token:    cfg.GetToken(),
-			Current:  qfield.ToFieldPb(qfield.FromRequest(curr)),
-			Previous: qfield.ToFieldPb(qfield.FromRequest(prev)),
+			Current:  args.Curr.AsField().AsFieldPb(),
+			Previous: args.Prev.AsField().AsFieldPb(),
 			Context:  []*qprotobufs.DatabaseField{},
 		}
 
+		reqs := []*qdata.Request{}
 		for _, ctxField := range cfg.GetContextFields() {
-			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
-			me.fieldOperator.Read(ctx, ctxReq)
-			if ctxReq.IsSuccessful() {
-				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
+			reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
+		}
+		me.store.Read(args.Ctx, reqs...)
+		for _, ctxReq := range reqs {
+			if ctxReq.Success {
+				notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
 			}
 		}
 
@@ -109,15 +93,13 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 		}
 	}
 
-	fetchedEntity := me.entityManager.GetEntity(ctx, indirectEntity)
+	fetchedEntity := me.store.GetEntity(args.Ctx, indirectEntity)
 	if fetchedEntity == nil {
-		qlog.Error("Failed to get entity: %v (indirect=%v)", curr.GetEntityId(), indirectEntity)
+		qlog.Error("Failed to get entity: %v (indirect=%v)", args.Curr.EntityId, indirectEntity)
 		return
 	}
 
-	me.mu.RLock()
-	typeLeases := me.getEntityLeases(fetchedEntity.GetType())
-	me.mu.RUnlock()
+	typeLeases := me.getEntityLeases(fetchedEntity.EntityType.AsString())
 
 	for _, lease := range typeLeases {
 		cfg := lease.Config
@@ -128,16 +110,19 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 
 		notifMsg := &qprotobufs.DatabaseNotification{
 			Token:    cfg.GetToken(),
-			Current:  qfield.ToFieldPb(qfield.FromRequest(curr)),
-			Previous: qfield.ToFieldPb(qfield.FromRequest(prev)),
+			Current:  args.Curr.AsField().AsFieldPb(),
+			Previous: args.Prev.AsField().AsFieldPb(),
 			Context:  []*qprotobufs.DatabaseField{},
 		}
 
+		reqs := []*qdata.Request{}
 		for _, ctxField := range cfg.GetContextFields() {
-			ctxReq := qrequest.New().SetEntityId(indirectEntity).SetFieldName(ctxField)
-			me.fieldOperator.Read(ctx, ctxReq)
-			if ctxReq.IsSuccessful() {
-				notifMsg.Context = append(notifMsg.Context, qfield.ToFieldPb(qfield.FromRequest(ctxReq)))
+			reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
+		}
+		me.store.Read(args.Ctx, reqs...)
+		for _, ctxReq := range reqs {
+			if ctxReq.Success {
+				notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
 			}
 		}
 
@@ -155,8 +140,8 @@ func (me *notificationManager) PublishNotifications(ctx context.Context, curr qd
 }
 
 // Helper method to safely get entity leases
-func (me *notificationManager) getEntityLeases(entityId string) []NotificationLease {
-	if leases, ok := me.registeredNotifications[entityId]; ok {
+func (me *notificationManager) getEntityLeases(entityIdOrType string) []NotificationLease {
+	if leases, ok := me.registeredNotifications[entityIdOrType]; ok {
 		result := make([]NotificationLease, 0, len(leases))
 		for _, lease := range leases {
 			result = append(result, lease)
@@ -172,35 +157,30 @@ func (me *notificationManager) Register(cfg qdata.NotificationConfig) {
 		ExpireAt: time.Now().Add(LeaseDuration),
 	}
 
-	me.mu.Lock()
-	defer me.mu.Unlock()
-
-	if me.registeredNotifications[cfg.GetEntityId()] == nil {
-		me.registeredNotifications[cfg.GetEntityId()] = make(map[string]NotificationLease)
+	entityId := string(cfg.GetEntityId())
+	if me.registeredNotifications[entityId] == nil {
+		me.registeredNotifications[entityId] = make(map[string]NotificationLease)
 	}
 
-	me.registeredNotifications[cfg.GetEntityId()][cfg.GetToken()] = lease
+	me.registeredNotifications[entityId][cfg.GetToken()] = lease
 }
 
 func (me *notificationManager) Unregister(cfg qdata.NotificationConfig) {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-
-	if me.registeredNotifications[cfg.GetEntityId()] == nil {
+	entityId := string(cfg.GetEntityId())
+	if me.registeredNotifications[entityId] == nil {
 		return
 	}
 
-	delete(me.registeredNotifications[cfg.GetEntityId()], cfg.GetToken())
+	delete(me.registeredNotifications[entityId], cfg.GetToken())
 
-	if len(me.registeredNotifications[cfg.GetEntityId()]) == 0 {
-		delete(me.registeredNotifications, cfg.GetEntityId())
+	if len(me.registeredNotifications[entityId]) == 0 {
+		delete(me.registeredNotifications, entityId)
 	}
 }
 
 func (me *notificationManager) ClearExpired() {
 	activeLeases := make(map[string]map[string]NotificationLease)
 
-	me.mu.RLock()
 	for entityId, leases := range me.registeredNotifications {
 		for token, lease := range leases {
 			if time.Now().After(lease.ExpireAt) {
@@ -214,9 +194,6 @@ func (me *notificationManager) ClearExpired() {
 			activeLeases[entityId][token] = lease
 		}
 	}
-	me.mu.RUnlock()
 
-	me.mu.Lock()
 	me.registeredNotifications = activeLeases
-	me.mu.Unlock()
 }
