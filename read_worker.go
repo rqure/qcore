@@ -9,7 +9,6 @@ import (
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qquery"
-	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
@@ -286,8 +285,12 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 		for iterator.Next(ctx) {
 			user := iterator.Get()
 
-			authorizer := qstore.NewFieldAuthorizer(user.EntityId, w.store)
-			w.store.Read(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
+			w.store.Read(
+				context.WithValue(
+					ctx,
+					qcontext.KeyAuthorizer,
+					qauthorization.NewAuthorizer(user.EntityId, w.store)),
+				reqs...)
 
 			found = true
 
@@ -301,8 +304,12 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 			for iterator.Next(ctx) {
 				client := iterator.Get()
 
-				authorizer := qstore.NewFieldAuthorizer(client.EntityId, w.store)
-				w.store.Read(context.WithValue(ctx, qdata.FieldAuthorizerKey, authorizer), reqs...)
+				w.store.Read(
+					context.WithValue(
+						ctx,
+						qcontext.KeyAuthorizer,
+						qauthorization.NewAuthorizer(client.EntityId, w.store)),
+					reqs...)
 
 				// Break after first client
 				break
