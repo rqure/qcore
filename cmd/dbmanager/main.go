@@ -10,9 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qbinding"
-	"github.com/rqure/qlib/pkg/qdata/qfield"
-	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
@@ -375,14 +372,16 @@ func initializeQStoreSchema(ctx context.Context) error {
 
 	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: "Root",
+		Name: qdata.ETRoot.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "SchemaUpdateTrigger", Type: qfield.Choice, ChoiceOptions: []string{"Trigger"}},
+			{Name: "SchemaChanged", Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
+			{Name: "EntityCreated", Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
+			{Name: "EntityDeleted", Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
 		},
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   "Folder",
+		Name:   qdata.ETFolder.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
@@ -399,8 +398,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: "Role",
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "Permissions", Type: qfield.EntityList},
-			{Name: "AreasOfResponsibilities", Type: qfield.EntityList},
+			{Name: "Permissions", Type: qdata.VTEntityList.AsString()},
+			{Name: "AreasOfResponsibilities", Type: qdata.VTEntityList.AsString()},
 		},
 	}))
 
@@ -508,42 +507,40 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil
 	}
 
-	roots := qquery.New(store).
-		Select("Name").
-		From("Root").
-		Where("Name").Equals(path[0]).
-		Execute(ctx)
+	iterator := store.PrepareQuery("SELECT Name FROM Root WHERE Name = %q", path[0])
 
 	var currentNode *qdata.Entity
-	if len(roots) == 0 {
-		if entityType == "Root" {
-			qlog.Info("Creating root entity '%s'", path[0])
-			rootId := store.CreateEntity(ctx, "Root", "", path[0])
+	if !iterator.Next(ctx) {
+		if entityType == qdata.ETRoot {
+			qlog.Info("Creating %s entity '%s'", qdata.ETRoot, path[0])
+			rootId := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
 			currentNode = qbinding.NewEntity(ctx, store, rootId)
 		} else {
 			qlog.Error("Root entity not found")
 			return nil
 		}
 	} else {
-		currentNode = roots[0]
-
-		if len(roots) > 1 && len(path) > 1 {
-			qlog.Warn("Multiple root entities found: %v", roots)
-		} else if len(path) == 1 {
-			return currentNode
-		}
+		currentNode = iterator.Get()
+		return currentNode
 	}
 
 	// Create the last item in the path
 	// Return early if the intermediate entities are not found
 	lastIndex := len(path) - 2
 	for i, name := range path[1:] {
-		children := currentNode.Field("Children").ReadEntityList(ctx).GetEntities()
+		store.Read(ctx, currentNode.Field("Children").AsReadRequest())
+		children := currentNode.Field("Children").Value.GetEntityList()
 
 		found := false
 		for _, childId := range children {
-			child := qbinding.NewEntity(ctx, store, childId)
-			if child.GetField("Name").ReadString(ctx) == name {
+			child := new(qdata.Entity).Init(childId)
+
+			store.Read(ctx,
+				child.Field("Name").AsReadRequest(),
+				child.Field("Children").AsReadRequest(),
+			)
+
+			if child.Field("Name").Value.GetString() == name {
 				currentNode = child
 				found = true
 				break
@@ -552,8 +549,8 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 
 		if !found && i == lastIndex {
 			qlog.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
-			entityId := store.CreateEntity(ctx, entityType, currentNode.GetId(), name)
-			return qbinding.NewEntity(ctx, store, entityId)
+			entityId := store.CreateEntity(ctx, entityType, currentNode.EntityId, name)
+			return new(qdata.Entity).Init(entityId)
 		} else if !found {
 			qlog.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
 			return nil
@@ -565,5 +562,5 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil
 	}
 
-	return qbinding.NewEntity(ctx, store, currentNode.GetId())
+	return new(qdata.Entity).Init(currentNode.EntityId)
 }
