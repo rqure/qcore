@@ -374,9 +374,9 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: qdata.ETRoot.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "SchemaChanged", Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
-			{Name: "EntityCreated", Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
-			{Name: "EntityDeleted", Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
+			{Name: qdata.SchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
+			{Name: qdata.EntityCreated.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
+			{Name: qdata.EntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
 		},
 	}))
 
@@ -386,100 +386,80 @@ func initializeQStoreSchema(ctx context.Context) error {
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   "Permission",
+		Name: qdata.ETPermission.AsString(),
+		Fields: []*qprotobufs.DatabaseFieldSchema{
+			{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString()},
+		},
+	}))
+
+	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		Name:   qdata.ETAreaOfResponsibility.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   "AreaOfResponsibility",
+		Name:   qdata.ETRole.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{},
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: "Role",
+		Name: qdata.ETUser.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "Permissions", Type: qdata.VTEntityList.AsString()},
-			{Name: "AreasOfResponsibilities", Type: qdata.VTEntityList.AsString()},
+			{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString()},
+			{Name: qdata.FTAreasOfResponsibilities.AsString(), Type: qdata.VTEntityList.AsString()},
+			{Name: qdata.FTSourceOfTruth.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"QOS", "Keycloak"}},
+			{Name: qdata.FTKeycloakId.AsString(), Type: qdata.VTString.AsString()},
+			{Name: qdata.FTEmail.AsString(), Type: qdata.VTString.AsString()},
+			{Name: qdata.FTFirstName.AsString(), Type: qdata.VTString.AsString()},
+			{Name: qdata.FTLastName.AsString(), Type: qdata.VTString.AsString()},
+			{Name: qdata.FTIsEmailVerified.AsString(), Type: qdata.VTBool.AsString()},
+			{Name: qdata.FTIsEnabled.AsString(), Type: qdata.VTBool.AsString()},
+			{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString()},
 		},
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: "User",
+		Name: qdata.ETClient.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "Roles", Type: qfield.EntityList},
-			{Name: "SelectedRole", Type: qfield.EntityReference},
-			{Name: "Permissions", Type: qfield.EntityList},
-			{Name: "TotalPermissions", Type: qfield.EntityList},
-			{Name: "AreasOfResponsibilities", Type: qfield.EntityList},
-			{Name: "SelectedAORs", Type: qfield.EntityReference},
-			{Name: "SourceOfTruth", Type: qfield.Choice, ChoiceOptions: []string{"QOS", "Keycloak"}},
-			{Name: "KeycloakId", Type: qfield.String},
-			{Name: "Email", Type: qfield.String},
-			{Name: "FirstName", Type: qfield.String},
-			{Name: "LastName", Type: qfield.String},
-			{Name: "IsEmailVerified", Type: qfield.Bool},
-			{Name: "IsEnabled", Type: qfield.Bool},
-			{Name: "JSON", Type: qfield.String},
+			{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
+			{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
 		},
 	}))
 
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: "Client",
+		Name: qdata.ETSessionController.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "Permissions", Type: qfield.EntityList},
-			{Name: "LogLevel", Type: qfield.Choice, ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
-			{Name: "QLibLogLevel", Type: qfield.Choice, ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
-		},
-	}))
-
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: "SessionController",
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: "LastEventTime", Type: qfield.Timestamp},
-			{Name: "Logout", Type: qfield.EntityReference},
+			{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString()},
+			{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString()},
 		},
 	}))
 
 	// Create root entity
-	ensureEntity(ctx, s, "Root", "Root")
+	ensureEntity(ctx, s, qdata.ETRoot, "Root")
 
 	// Create the security models
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models")
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models")
 
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Permissions")
-	systemPermission := ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
-	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Security")
-	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Configuration")
-	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System", "Application")
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Permissions")
+	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
 
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Areas of Responsibility")
-	systemAor := ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
-	ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System", "Database")
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Areas of Responsibility")
+	ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
 
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Roles")
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Roles")
 	adminRole := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
 
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Users")
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Users")
 	adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
 
-	ensureEntity(ctx, s, "Folder", "Root", "Security Models", "Clients")
-	coreClient := ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
-
-	adminRole.Field("Permissions").Value.SetEntityList([]qdata.EntityId{systemPermission.EntityId})
-	adminRole.Field("AreasOfResponsibilities").Value.SetEntityList([]qdata.EntityId{systemAor.EntityId})
-	s.Write(ctx,
-		adminRole.Field("Permissions").AsWriteRequest(),
-		adminRole.Field("AreasOfResponsibilities").AsWriteRequest())
+	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
+	ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
 
 	adminUser.Field("Roles").Value.SetEntityList([]qdata.EntityId{adminRole.EntityId})
 	adminUser.Field("SourceOfTruth").Value.SetChoice(0)
 	s.Write(ctx,
 		adminUser.Field("Roles").AsWriteRequest(),
 		adminUser.Field("SourceOfTruth").AsWriteRequest())
-
-	coreClient.Field("Permissions").Value.SetEntityList([]qdata.EntityId{systemPermission.EntityId})
-	s.Write(ctx,
-		coreClient.Field("Permissions").AsWriteRequest())
 
 	qlog.Info("Database schema initialization complete")
 	return nil
@@ -514,7 +494,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		if entityType == qdata.ETRoot {
 			qlog.Info("Creating %s entity '%s'", qdata.ETRoot, path[0])
 			rootId := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
-			currentNode = qbinding.NewEntity(ctx, store, rootId)
+			currentNode = new(qdata.Entity).Init(rootId)
 		} else {
 			qlog.Error("Root entity not found")
 			return nil
