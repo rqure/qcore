@@ -7,10 +7,9 @@ import (
 
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
-	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qauthentication"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qss"
 )
@@ -70,9 +69,9 @@ type sessionWorker struct {
 	store   *qdata.Store
 	isReady bool
 
-	core         qauth.Core
-	admin        qauth.Admin
-	eventEmitter qauth.EventEmitter
+	core         qauthentication.Core
+	admin        qauthentication.Admin
+	eventEmitter qauthentication.EventEmitter
 
 	initTimer      *time.Ticker
 	fullSyncTimer  *time.Ticker
@@ -95,9 +94,9 @@ func (me *sessionWorker) Init(ctx context.Context) {
 		return
 	}
 
-	me.core = qauth.NewCore()
-	me.admin = qauth.NewAdmin(me.core)
-	me.eventEmitter = qauth.NewEventEmitter(me.core)
+	me.core = qauthentication.NewCore()
+	me.admin = qauthentication.NewAdmin(me.core)
+	me.eventEmitter = qauthentication.NewEventEmitter(me.core)
 	me.eventEmitter.Signal().Connect(me.handleKeycloakEvent)
 
 	me.initTimer = time.NewTicker(initSyncInterval)
@@ -185,102 +184,88 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 func (me *sessionWorker) OnReady(ctx context.Context) {
 	me.isReady = true
 
-	sessionControllers := qquery.New(me.store).
-		Select("LastEventTime").
-		From("SessionController").
-		Execute(ctx)
-
-	for _, sessionController := range sessionControllers {
-		lastEventTime := sessionController.GetField("LastEventTime").GetTimestamp()
+	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(ctx, func(ctx context.Context, sessionController *qdata.Entity) {
+		lastEventTime := sessionController.Field("LastEventTime").Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
-	}
+	})
 }
 
 func (me *sessionWorker) OnNotReady(context.Context) {
 	me.isReady = false
 }
 
-func (me *sessionWorker) handleKeycloakEvent(e qauth.EmittedEvent) {
-	sessionControllers := qquery.New(me.store).
-		Select().
-		From("SessionController").
-		Execute(e.Ctx)
-
-	for _, sessionController := range sessionControllers {
-		sessionController.GetField("LastEventTime").WriteTimestamp(e.Ctx, time.Now())
-	}
+func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
+	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(e.Ctx, func(ctx context.Context, sessionController *qdata.Entity) {
+		sessionController.Field("LastEventTime").Value.SetTimestamp(time.Now())
+		me.store.Write(e.Ctx, sessionController.Field("LastEventTime").AsWriteRequest())
+	})
 }
 
 func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	// 1. Sync store users to Keycloak
-	storeUsers := qquery.New(me.store).
-		Select("Name", "SourceOfTruth", "Parent").
-		From("User").
-		Execute(ctx)
+	// usersFolderId := qdata.PathResolver
 
-	usersFolderId := ""
+	// keycloakUsersByName, err := me.admin.GetUsers(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get Keycloak users: %w", err)
+	// }
 
-	keycloakUsersByName, err := me.admin.GetUsers(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get Keycloak users: %w", err)
-	}
+	// iterator := me.store.PrepareQuery("SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
+	// for _, user := range storeUsers {
+	// 	storeUsersByName[user.GetField("Name").GetString()] = user
 
-	iterator := me.store.PrepareQuery("SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
-	for _, user := range storeUsers {
-		storeUsersByName[user.GetField("Name").GetString()] = user
+	// 	if usersFolderId == "" {
+	// 		usersFolderId = user.GetField("Parent").GetEntityReference()
+	// 	}
 
-		if usersFolderId == "" {
-			usersFolderId = user.GetField("Parent").GetEntityReference()
-		}
+	// 	// Only sync users where store is source of truth
+	// 	if user.GetField("SourceOfTruth").GetCompleteChoice(ctx).Option() != "QOS" {
+	// 		continue
+	// 	}
 
-		// Only sync users where store is source of truth
-		if user.GetField("SourceOfTruth").GetCompleteChoice(ctx).Option() != "QOS" {
-			continue
-		}
+	// 	// Create or update user in Keycloak
+	// 	username := user.GetField("Name").GetString()
+	// 	if _, ok := keycloakUsersByName[username]; !ok {
+	// 		qlog.Info("Creating QOS user '%s' in Keycloak", username)
+	// 		if err := me.admin.CreateUser(ctx, username, username); err != nil {
+	// 			qlog.Error("Failed to sync user %s to Keycloak: %v", username, err)
+	// 		}
+	// 	}
+	// }
 
-		// Create or update user in Keycloak
-		username := user.GetField("Name").GetString()
-		if _, ok := keycloakUsersByName[username]; !ok {
-			qlog.Info("Creating QOS user '%s' in Keycloak", username)
-			if err := me.admin.CreateUser(ctx, username, username); err != nil {
-				qlog.Error("Failed to sync user %s to Keycloak: %v", username, err)
-			}
-		}
-	}
-
-	if usersFolderId == "" {
-		return fmt.Errorf("users folder not found")
-	}
+	// if usersFolderId == "" {
+	// 	return fmt.Errorf("users folder not found")
+	// }
 
 	// 2. Sync Keycloak users to store
-	for _, kcUser := range keycloakUsersByName {
-		if user, ok := storeUsersByName[kcUser.GetUsername()]; !ok {
-			qlog.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
-			userId := me.store.CreateEntity(ctx, "User", usersFolderId, kcUser.GetUsername())
-			user = qbinding.NewEntity(ctx, me.store, userId)
-			user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
-				userBinding.GetField("SourceOfTruth").WriteChoice(ctx, "Keycloak")
-				userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
-				userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
-				userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
-				userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
-				userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
-				userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
-				userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
-			})
-		} else {
-			qlog.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
-			user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
-				userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
-				userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
-				userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
-				userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
-				userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
-				userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
-				userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
-			})
-		}
-	}
+	// for _, kcUser := range keycloakUsersByName {
+	// 	if user, ok := storeUsersByName[kcUser.GetUsername()]; !ok {
+	// 		qlog.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
+	// 		userId := me.store.CreateEntity(ctx, "User", usersFolderId, kcUser.GetUsername())
+	// 		user = qbinding.NewEntity(ctx, me.store, userId)
+	// 		user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
+	// 			userBinding.GetField("SourceOfTruth").WriteChoice(ctx, "Keycloak")
+	// 			userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
+	// 			userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
+	// 			userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
+	// 			userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
+	// 			userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
+	// 			userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
+	// 			userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
+	// 		})
+	// 	} else {
+	// 		qlog.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
+	// 		user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
+	// 			userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
+	// 			userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
+	// 			userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
+	// 			userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
+	// 			userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
+	// 			userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
+	// 			userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
+	// 		})
+	// 	}
+	// }
 
 	return nil
 }

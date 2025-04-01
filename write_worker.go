@@ -5,7 +5,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
-	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qauthentication"
+	"github.com/rqure/qlib/pkg/qauthorization"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
@@ -209,7 +210,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 	}
 
 	qlog.Info("Write request: %v", req.Requests)
-	clientProvider := qcontext.GetClientProvider[qauth.Client](ctx)
+	clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
 	client := clientProvider.Client(ctx)
 	if client != nil {
 		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)

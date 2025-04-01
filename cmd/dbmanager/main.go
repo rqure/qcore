@@ -374,9 +374,9 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: qdata.ETRoot.AsString(),
 		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.SchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
-			{Name: qdata.EntityCreated.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
-			{Name: qdata.EntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
+			{Name: qdata.FTSchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
+			{Name: qdata.FTEntityCreated.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
+			{Name: qdata.FTEntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
 		},
 	}))
 

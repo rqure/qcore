@@ -5,10 +5,10 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
-	"github.com/rqure/qlib/pkg/qauth"
+	"github.com/rqure/qlib/pkg/qauthentication"
+	"github.com/rqure/qlib/pkg/qauthorization"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qquery"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
@@ -57,13 +57,13 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 		switch {
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntityRequest{}):
 			w.handleGetEntity(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntityTypesRequest{}):
+		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
 			w.handleGetEntityTypes(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
 			w.handleGetEntitySchema(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
 			w.handleGetRoot(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntitiesRequest{}):
+		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
 			w.handleGetEntities(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
 			w.handleFieldExists(ctx, msg, &apiMsg)
@@ -73,6 +73,8 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 			w.handleGetDatabaseConnectionStatus(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
 			w.handleDatabaseRequest(ctx, msg, &apiMsg)
+		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
+			w.handleQuery(ctx, msg, &apiMsg)
 		}
 	})
 }
@@ -110,8 +112,8 @@ func (w *readWorker) handleGetEntity(ctx context.Context, msg *nats.Msg, apiMsg 
 }
 
 func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
-	req := new(qprotobufs.ApiConfigGetEntityTypesRequest)
-	rsp := new(qprotobufs.ApiConfigGetEntityTypesResponse)
+	req := new(qprotobufs.ApiRuntimeGetEntityTypesRequest)
+	rsp := new(qprotobufs.ApiRuntimeGetEntityTypesResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Error("Could not unmarshal request: %v", err)
@@ -119,8 +121,23 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 		return
 	}
 
-	types := w.store.GetEntityTypes(ctx)
-	rsp.Types = types
+	// Apply default page size if not specified
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+
+	paginatedResult := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
+	pageResult, err := paginatedResult.NextPage(ctx)
+	if err != nil {
+		qlog.Error("Error fetching entity types: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	rsp.EntityTypes = qdata.CastSlice(pageResult.Items, func(t qdata.EntityType) string { return t.AsString() })
+	rsp.HasMore = pageResult.HasMore
+	rsp.NextCursor = pageResult.CursorId
 
 	w.sendResponse(msg, rsp)
 }
@@ -148,7 +165,6 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	w.sendResponse(msg, rsp)
 }
 
-// Add new handler methods
 func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
 	req := new(qprotobufs.ApiConfigGetRootRequest)
 	rsp := new(qprotobufs.ApiConfigGetRootResponse)
@@ -169,8 +185,8 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 }
 
 func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
-	req := new(qprotobufs.ApiRuntimeGetEntitiesRequest)
-	rsp := new(qprotobufs.ApiRuntimeGetEntitiesResponse)
+	req := new(qprotobufs.ApiRuntimeFindEntitiesRequest)
+	rsp := new(qprotobufs.ApiRuntimeFindEntitiesResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Error("Could not unmarshal request: %v", err)
@@ -178,14 +194,32 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 		return
 	}
 
-	entities := qquery.New(w.store).
-		Select().
-		From(req.EntityType).
-		Execute(ctx)
-
-	for _, ent := range entities {
-		rsp.Entities = append(rsp.Entities, qentity.ToEntityPb(ent))
+	// Apply default page size if not specified
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 100 // default page size
 	}
+
+	iterator := w.store.FindEntities(qdata.EntityType(req.EntityType),
+		qdata.POPageSize(pageSize),
+		qdata.POCursorId(req.Cursor))
+
+	pageResult, err := iterator.NextPage(ctx)
+	if err != nil {
+		qlog.Error("Error fetching entities: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	// Convert EntityId array to string array
+	entityIds := make([]string, 0, len(pageResult.Items))
+	for _, entityId := range pageResult.Items {
+		entityIds = append(entityIds, string(entityId))
+	}
+
+	rsp.Entities = entityIds
+	rsp.HasMore = pageResult.HasMore
+	rsp.NextCursor = pageResult.CursorId
 
 	w.sendResponse(msg, rsp)
 }
@@ -264,7 +298,7 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	}
 
 	qlog.Info("Read request: %v", req.Requests)
-	clientProvider := qcontext.GetClientProvider[qauth.Client](ctx)
+	clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
 	client := clientProvider.Client(ctx)
 	if client != nil {
 		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
@@ -322,7 +356,66 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	w.sendResponse(msg, rsp)
 }
 
-// Helper methods for common operations
+func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+	req := new(qprotobufs.ApiRuntimeQueryRequest)
+	rsp := new(qprotobufs.ApiRuntimeQueryResponse)
+
+	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+		qlog.Error("Could not unmarshal request: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	if !w.isReady {
+		qlog.Error("Could not handle query request. Database is not connected.")
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	// Apply default page size if not specified
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 100 // default page size
+	}
+
+	// Convert type hints to qdata.TypeHintOpts
+	opts := make([]interface{}, 0)
+	for _, hint := range req.TypeHints {
+		opts = append(opts,
+			qdata.TypeHint(
+				qdata.FieldType(hint.FieldType),
+				qdata.ValueType(hint.ValueType),
+			),
+		)
+	}
+	opts = append(opts, qdata.POPageSize(pageSize))
+	opts = append(opts, qdata.POCursorId(req.Cursor))
+
+	// Prepare and execute the query with pagination
+	iterator := w.store.PrepareQuery(
+		req.Query,
+		opts...,
+	)
+
+	pageResult, err := iterator.NextPage(ctx)
+	if err != nil {
+		qlog.Error("Error executing query: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	// Convert the results to protobuf format
+	rsp.Entities = make([]*qprotobufs.DatabaseEntity, 0, len(pageResult.Items))
+	for _, entity := range pageResult.Items {
+		rsp.Entities = append(rsp.Entities, entity.AsEntityPb())
+	}
+
+	rsp.HasMore = pageResult.HasMore
+	rsp.NextCursor = pageResult.CursorId
+
+	w.sendResponse(msg, rsp)
+}
+
 func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	if msg.Reply == "" {
 		return
