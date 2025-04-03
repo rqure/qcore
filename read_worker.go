@@ -174,11 +174,10 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 		return
 	}
 
-	iterator := w.store.FindEntities("Root")
-
-	for iterator.Next(ctx) {
-		rsp.RootId = string(iterator.Get())
-	}
+	w.store.FindEntities("Root").ForEach(ctx, func(entityId qdata.EntityId) bool {
+		rsp.RootId = entityId.AsString()
+		return false // Break after first root
+	})
 
 	w.sendResponse(msg, rsp)
 }
@@ -313,39 +312,36 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 		}
 
 		found := false
-		iterator := w.store.PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName)
-		for iterator.Next(ctx) {
-			user := iterator.Get()
-
-			w.store.Read(
-				context.WithValue(
-					ctx,
-					qcontext.KeyAuthorizer,
-					qauthorization.NewAuthorizer(user.EntityId, w.store)),
-				reqs...)
-
-			found = true
-
-			// Break after first user
-			break
-		}
-
-		if !found {
-			iterator := w.store.PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName)
-
-			for iterator.Next(ctx) {
-				client := iterator.Get()
-
+		w.store.
+			PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName).
+			ForEach(ctx, func(user *qdata.Entity) bool {
 				w.store.Read(
 					context.WithValue(
 						ctx,
 						qcontext.KeyAuthorizer,
-						qauthorization.NewAuthorizer(client.EntityId, w.store)),
+						qauthorization.NewAuthorizer(user.EntityId, w.store)),
 					reqs...)
 
-				// Break after first client
-				break
-			}
+				found = true
+
+				// Break after first user
+				return false
+			})
+
+		if !found {
+			w.store.
+				PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName).
+				ForEach(ctx, func(client *qdata.Entity) bool {
+					w.store.Read(
+						context.WithValue(
+							ctx,
+							qcontext.KeyAuthorizer,
+							qauthorization.NewAuthorizer(client.EntityId, w.store)),
+						reqs...)
+
+					// Break after first client
+					return false
+				})
 		}
 	}
 

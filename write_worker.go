@@ -227,38 +227,36 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		}
 
 		found := false
-		iterator := w.store.PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName)
-		for iterator.Next(ctx) {
-			user := iterator.Get()
-
-			w.store.Write(
-				context.WithValue(
-					ctx,
-					qcontext.KeyAuthorizer,
-					qauthorization.NewAuthorizer(user.EntityId, w.store)),
-				reqs...)
-
-			found = true
-
-			// Break after first user
-			break
-		}
-
-		if !found {
-			iterator := w.store.PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName)
-
-			for iterator.Next(ctx) {
-				client := iterator.Get()
+		w.store.
+			PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName).
+			ForEach(ctx, func(user *qdata.Entity) bool {
 				w.store.Write(
 					context.WithValue(
 						ctx,
 						qcontext.KeyAuthorizer,
-						qauthorization.NewAuthorizer(client.EntityId, w.store)),
+						qauthorization.NewAuthorizer(user.EntityId, w.store)),
 					reqs...)
 
-				// Break after first client
-				break
-			}
+				found = true
+
+				// Break after first user
+				return false
+			})
+
+		if !found {
+			w.store.
+				PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName).
+				ForEach(ctx, func(client *qdata.Entity) bool {
+					w.store.Write(
+						context.WithValue(
+							ctx,
+							qcontext.KeyAuthorizer,
+							qauthorization.NewAuthorizer(client.EntityId, w.store)),
+						reqs...)
+
+					// Break after first client
+					return false
+				})
 		}
 	}
 
