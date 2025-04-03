@@ -30,6 +30,8 @@ var (
 	timeout      int
 	confirm      bool
 	initialize   bool
+	logLevel     string
+	libLogLevel  string
 )
 
 func init() {
@@ -41,6 +43,8 @@ func init() {
 	flag.BoolVar(&keycloakDB, "keycloak", false, "Manage keycloak database")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
 	flag.BoolVar(&confirm, "confirm", false, "Confirm destructive operations without prompt")
+	flag.StringVar(&logLevel, "log-level", "INFO", "Set application log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
+	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.Parse()
 }
 
@@ -52,6 +56,9 @@ func getEnvOrDefault(env, defaultVal string) string {
 }
 
 func main() {
+	// Set log levels before any other operations
+	setLogLevel(logLevel, libLogLevel)
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
@@ -134,6 +141,31 @@ func main() {
 	}
 
 	qlog.Info("Database operations completed")
+}
+
+func setLogLevel(appLevel, libLevel string) {
+	levelMap := map[string]qlog.Level{
+		"TRACE": qlog.TRACE,
+		"DEBUG": qlog.DEBUG,
+		"INFO":  qlog.INFO,
+		"WARN":  qlog.WARN,
+		"ERROR": qlog.ERROR,
+		"PANIC": qlog.PANIC,
+	}
+
+	if level, ok := levelMap[strings.ToUpper(appLevel)]; ok {
+		qlog.SetLevel(level)
+	} else {
+		qlog.Warn("Invalid log level '%s', using INFO", appLevel)
+		qlog.SetLevel(qlog.INFO)
+	}
+
+	if level, ok := levelMap[strings.ToUpper(libLevel)]; ok {
+		qlog.SetLibLevel(level)
+	} else {
+		qlog.Warn("Invalid lib log level '%s', using INFO", libLevel)
+		qlog.SetLibLevel(qlog.INFO)
+	}
 }
 
 func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
@@ -457,8 +489,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
 	ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
 
-	adminUser.Field("Roles").Value.SetEntityList([]qdata.EntityId{adminRole.EntityId})
-	adminUser.Field("SourceOfTruth").Value.SetChoice(0)
+	adminUser.Field("Roles").Value.FromEntityList([]qdata.EntityId{adminRole.EntityId})
+	adminUser.Field("SourceOfTruth").Value.FromChoice(0)
 	s.Write(ctx,
 		adminUser.Field("Roles").AsWriteRequest(),
 		adminUser.Field("SourceOfTruth").AsWriteRequest())
@@ -496,14 +528,13 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		if entityType == qdata.ETRoot {
 			qlog.Info("Creating %s entity '%s'", qdata.ETRoot, path[0])
 			rootId := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
-			currentNode = new(qdata.Entity).Init(rootId)
+			return new(qdata.Entity).Init(rootId)
 		} else {
 			qlog.Error("Root entity not found")
 			return nil
 		}
 	} else {
 		currentNode = iterator.Get()
-		return currentNode
 	}
 
 	// Create the last item in the path
