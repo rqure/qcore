@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -95,7 +96,7 @@ func main() {
 
 		if initialize {
 			qlog.Info("Initializing qstore database schema...")
-			if err := initializeQStoreSchema(ctx); err != nil {
+			if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "dbmanager")); err != nil {
 				qlog.Error("Failed to initialize qstore schema: %v", err)
 			} else {
 				qlog.Info("qstore schema initialized successfully")
@@ -359,6 +360,7 @@ func initializeQStoreSchema(ctx context.Context) error {
 	startTime := time.Now()
 	timeout := 30 * time.Second
 	for !s.IsConnected() {
+		s.CheckConnection(ctx)
 		if time.Since(startTime) > timeout {
 			return fmt.Errorf("timeout waiting for database connection")
 		}

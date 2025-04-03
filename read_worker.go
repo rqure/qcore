@@ -136,7 +136,6 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	}
 
 	rsp.EntityTypes = qdata.CastSlice(pageResult.Items, func(t qdata.EntityType) string { return t.AsString() })
-	rsp.HasMore = pageResult.HasMore
 	rsp.NextCursor = pageResult.CursorId
 
 	w.sendResponse(msg, rsp)
@@ -217,9 +216,8 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 		entityIds = append(entityIds, string(entityId))
 	}
 
-	rsp.Entities = entityIds
-	rsp.HasMore = pageResult.HasMore
 	rsp.NextCursor = pageResult.CursorId
+	rsp.Entities = entityIds
 
 	w.sendResponse(msg, rsp)
 }
@@ -410,7 +408,6 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 		rsp.Entities = append(rsp.Entities, entity.AsEntityPb())
 	}
 
-	rsp.HasMore = pageResult.HasMore
 	rsp.NextCursor = pageResult.CursorId
 
 	w.sendResponse(msg, rsp)

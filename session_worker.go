@@ -126,12 +126,12 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 		if session.PastHalfLife(ctx) {
 			err := session.Refresh(ctx)
 			if err != nil {
-				me.setAuthReadiness(ctx, false, fmt.Sprintf("failed to refresh session: %v", err))
+				me.setAuthReadiness(false, fmt.Sprintf("failed to refresh session: %v", err))
 				return
 			}
 		}
 	} else {
-		me.setAuthReadiness(ctx, false, "session is not valid")
+		me.setAuthReadiness(false, "session is not valid")
 		return
 	}
 
@@ -174,19 +174,20 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 	err := me.admin.EnsureSetup(ctx)
 	if err != nil {
 		qlog.Warn("Failed to ensure setup: %v", err)
-		me.setAuthReadiness(ctx, false, fmt.Sprintf("failed to ensure setup: %v", err))
+		me.setAuthReadiness(false, fmt.Sprintf("failed to ensure setup: %v", err))
 	}
 
 	qlog.Info("Setup of auth database complete")
-	me.setAuthReadiness(ctx, true, "")
+	me.setAuthReadiness(true, "")
 }
 
 func (me *sessionWorker) OnReady(ctx context.Context) {
 	me.isReady = true
 
-	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(ctx, func(ctx context.Context, sessionController *qdata.Entity) {
+	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(ctx, func(sessionController *qdata.Entity) bool {
 		lastEventTime := sessionController.Field("LastEventTime").Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
+		return true
 	})
 }
 
@@ -195,9 +196,10 @@ func (me *sessionWorker) OnNotReady(context.Context) {
 }
 
 func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
-	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(e.Ctx, func(ctx context.Context, sessionController *qdata.Entity) {
+	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(e.Ctx, func(sessionController *qdata.Entity) bool {
 		sessionController.Field("LastEventTime").Value.SetTimestamp(time.Now())
 		me.store.Write(e.Ctx, sessionController.Field("LastEventTime").AsWriteRequest())
+		return true
 	})
 }
 
@@ -270,7 +272,7 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	return nil
 }
 
-func (me *sessionWorker) setAuthReadiness(ctx context.Context, ready bool, reason string) {
+func (me *sessionWorker) setAuthReadiness(ready bool, reason string) {
 	if me.isAdminAuthReady == ready {
 		return
 	}
