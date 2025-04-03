@@ -83,7 +83,7 @@ func main() {
 		qlog.Error("Failed to create qstore database: %v", err)
 	}
 
-	if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "dbmanager")); err != nil {
+	if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "qinitdb")); err != nil {
 		qlog.Error("Failed to initialize qstore schema: %v", err)
 	}
 
