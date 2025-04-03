@@ -23,26 +23,14 @@ const (
 
 var (
 	postgresAddr string
-	create       bool
-	drop         bool
-	keycloakDB   bool
-	qstoreDB     bool
 	timeout      int
-	confirm      bool
-	initialize   bool
 	logLevel     string
 	libLogLevel  string
 )
 
 func init() {
 	flag.StringVar(&postgresAddr, "postgres", getEnvOrDefault("Q_POSTGRES_ADDR", defaultPostgresAddr), "PostgreSQL connection string")
-	flag.BoolVar(&create, "create", false, "Create databases")
-	flag.BoolVar(&drop, "drop", false, "Drop databases")
-	flag.BoolVar(&initialize, "initialize", false, "Initialize database schemas")
-	flag.BoolVar(&qstoreDB, "qstore", false, "Manage qstore database")
-	flag.BoolVar(&keycloakDB, "keycloak", false, "Manage keycloak database")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
-	flag.BoolVar(&confirm, "confirm", false, "Confirm destructive operations without prompt")
 	flag.StringVar(&logLevel, "log-level", "INFO", "Set application log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.Parse()
@@ -62,21 +50,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	if !qstoreDB && !keycloakDB {
-		qlog.Info("No database selected. Use -qstore or -keycloak flags.")
-		return
-	}
-
-	if !create && !drop && !initialize {
-		qlog.Info("No operation selected. Use -create, -drop, or -initialize flags.")
-		return
-	}
-
-	if drop && !confirm {
-		qlog.Warn("WARNING: Drop operation requires confirmation. Add -confirm flag to proceed.")
-		return
-	}
-
 	// Connect to default PostgreSQL database for database operations
 	pool, err := pgxpool.New(ctx, postgresAddr)
 	if err != nil {
@@ -91,56 +64,30 @@ func main() {
 
 	qlog.Info("Connected to PostgreSQL server")
 
-	if qstoreDB {
-		if create {
-			qlog.Info("Creating qstore database...")
-			if err := createQStoreDatabase(ctx, pool); err != nil {
-				qlog.Error("Failed to create qstore database: %v", err)
-			} else {
-				qlog.Info("qstore database created successfully")
-			}
-		}
-
-		if initialize {
-			qlog.Info("Initializing qstore database schema...")
-			if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "dbmanager")); err != nil {
-				qlog.Error("Failed to initialize qstore schema: %v", err)
-			} else {
-				qlog.Info("qstore schema initialized successfully")
-			}
-		}
-
-		if drop {
-			qlog.Info("Dropping qstore database...")
-			if err := dropQStoreDatabase(ctx, pool); err != nil {
-				qlog.Error("Failed to drop qstore database: %v", err)
-			} else {
-				qlog.Info("qstore database dropped successfully")
-			}
-		}
+	// Drop both databases first
+	qlog.Info("Dropping existing databases...")
+	if err := dropQStoreDatabase(ctx, pool); err != nil {
+		qlog.Error("Failed to drop qstore database: %v", err)
+	}
+	if err := dropKeycloakDatabase(ctx, pool); err != nil {
+		qlog.Error("Failed to drop keycloak database: %v", err)
 	}
 
-	if keycloakDB {
-		if create {
-			qlog.Info("Creating keycloak database...")
-			if err := createKeycloakDatabase(ctx, pool); err != nil {
-				qlog.Error("Failed to create keycloak database: %v", err)
-			} else {
-				qlog.Info("keycloak database created successfully")
-			}
-		}
-
-		if drop {
-			qlog.Info("Dropping keycloak database...")
-			if err := dropKeycloakDatabase(ctx, pool); err != nil {
-				qlog.Error("Failed to drop keycloak database: %v", err)
-			} else {
-				qlog.Info("keycloak database dropped successfully")
-			}
-		}
+	// Create and initialize both databases
+	qlog.Info("Creating and initializing databases...")
+	if err := createKeycloakDatabase(ctx, pool); err != nil {
+		qlog.Error("Failed to create keycloak database: %v", err)
 	}
 
-	qlog.Info("Database operations completed")
+	if err := createQStoreDatabase(ctx, pool); err != nil {
+		qlog.Error("Failed to create qstore database: %v", err)
+	}
+
+	if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "dbmanager")); err != nil {
+		qlog.Error("Failed to initialize qstore schema: %v", err)
+	}
+
+	qlog.Info("Database reinitialization completed")
 }
 
 func setLogLevel(appLevel, libLevel string) {
