@@ -27,6 +27,7 @@ var (
 	postgresAddr string
 	timeout      int
 	logLevel     string
+	libLogLevel  string
 	outputFormat string
 )
 
@@ -34,6 +35,7 @@ func init() {
 	flag.StringVar(&postgresAddr, "postgres", getEnvOrDefault("Q_POSTGRES_ADDR", defaultPostgresAddr), "PostgreSQL connection string")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
+	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&outputFormat, "format", "table", "Output format (table, json, xml)")
 	flag.Parse()
 }
@@ -107,6 +109,9 @@ func displayResults(results ResultSet) {
 }
 
 func main() {
+	// Set log levels before any other operations
+	setLogLevel(logLevel, libLogLevel)
+
 	ctx := context.WithValue(context.Background(), qcontext.KeyAppName, "qsql")
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
@@ -181,4 +186,29 @@ func main() {
 
 	// Display results in selected format
 	displayResults(results)
+}
+
+func setLogLevel(appLevel, libLevel string) {
+	levelMap := map[string]qlog.Level{
+		"TRACE": qlog.TRACE,
+		"DEBUG": qlog.DEBUG,
+		"INFO":  qlog.INFO,
+		"WARN":  qlog.WARN,
+		"ERROR": qlog.ERROR,
+		"PANIC": qlog.PANIC,
+	}
+
+	if level, ok := levelMap[strings.ToUpper(appLevel)]; ok {
+		qlog.SetLevel(level)
+	} else {
+		qlog.Warn("Invalid log level '%s', using INFO", appLevel)
+		qlog.SetLevel(qlog.INFO)
+	}
+
+	if level, ok := levelMap[strings.ToUpper(libLevel)]; ok {
+		qlog.SetLibLevel(level)
+	} else {
+		qlog.Warn("Invalid lib log level '%s', using INFO", libLevel)
+		qlog.SetLibLevel(qlog.INFO)
+	}
 }
