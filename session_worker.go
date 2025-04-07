@@ -184,7 +184,7 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 func (me *sessionWorker) OnReady(ctx context.Context) {
 	me.isReady = true
 
-	me.store.PrepareQuery("SELECT $EntityId, LastEventTime FROM SessionController").ForEach(ctx, func(row qdata.QueryRow) bool {
+	me.store.PrepareQuery(`SELECT "$EntityId", LastEventTime FROM SessionController`).ForEach(ctx, func(row qdata.QueryRow) bool {
 		sessionController := row.AsEntity()
 		lastEventTime := sessionController.Field("LastEventTime").Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
@@ -197,7 +197,7 @@ func (me *sessionWorker) OnNotReady(context.Context) {
 }
 
 func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
-	me.store.PrepareQuery("SELECT $EntityId, LastEventTime FROM SessionController").ForEach(e.Ctx, func(row qdata.QueryRow) bool {
+	me.store.PrepareQuery(`SELECT "$EntityId", LastEventTime FROM SessionController`).ForEach(e.Ctx, func(row qdata.QueryRow) bool {
 		sessionController := row.AsEntity()
 		sessionController.Field("LastEventTime").Value.SetTimestamp(time.Now())
 		me.store.Write(e.Ctx, sessionController.Field("LastEventTime").AsWriteRequest())
@@ -214,7 +214,7 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 	// 	return fmt.Errorf("failed to get Keycloak users: %w", err)
 	// }
 
-	// iterator := me.store.PrepareQuery("SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
+	// iterator := me.store.PrepareQuery(`SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
 	// for _, user := range storeUsers {
 	// 	storeUsersByName[user.GetField("Name").GetString()] = user
 

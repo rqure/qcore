@@ -228,7 +228,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 
 		found := false
 		w.store.
-			PrepareQuery("SELECT $EntityId FROM User WHERE Name = %q", accessorName).
+			PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName).
 			ForEach(ctx, func(row qdata.QueryRow) bool {
 				user := row.AsEntity()
 				w.store.Write(
@@ -246,7 +246,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 
 		if !found {
 			w.store.
-				PrepareQuery("SELECT $EntityId FROM Client WHERE Name = %q", accessorName).
+				PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName).
 				ForEach(ctx, func(row qdata.QueryRow) bool {
 					client := row.AsEntity()
 					w.store.Write(

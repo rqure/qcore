@@ -468,7 +468,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil
 	}
 
-	iterator := store.PrepareQuery("SELECT $EntityId FROM Root WHERE Name = %q", path[0])
+	iterator := store.PrepareQuery(`SELECT "$EntityId" FROM Root WHERE Name = %q`, path[0])
 	defer iterator.Close()
 	var currentNode *qdata.Entity
 	if !iterator.Next(ctx) {
