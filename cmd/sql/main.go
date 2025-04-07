@@ -73,7 +73,7 @@ func getEnvOrDefault(env, defaultVal string) string {
 // Result represents a row of data from the query result
 type Result struct {
 	Fields []Field `json:"-" xml:"field"`
-	data   map[string]string
+	data   qdata.QueryRow
 }
 
 // Field represents a single field in the XML output
@@ -125,7 +125,7 @@ func displayResults(results ResultSet) {
 			for j, header := range results.Headers {
 				result.Fields[j] = Field{
 					Name:  header,
-					Value: row.data[header],
+					Value: row.data.Get(header).AsString(),
 				}
 			}
 			xmlResults.Rows[i] = result
@@ -220,7 +220,7 @@ func displayResults(results ResultSet) {
 		for _, row := range results.Rows {
 			rowData := make([]string, len(results.Headers))
 			for i, header := range results.Headers {
-				rowData[i] = row.data[header]
+				rowData[i] = row.data.Get(header).AsString()
 			}
 			fmt.Println(strings.Join(rowData, " : "))
 		}
@@ -235,7 +235,7 @@ func displayResults(results ResultSet) {
 		for _, row := range results.Rows {
 			rowData := make([]string, len(results.Headers))
 			for i, header := range results.Headers {
-				rowData[i] = row.data[header]
+				rowData[i] = row.data.Get(header).AsString()
 			}
 			w.Write(rowData)
 		}
@@ -264,7 +264,7 @@ func displayResults(results ResultSet) {
 		for _, row := range results.Rows {
 			rowData := make([]string, len(results.Headers))
 			for i, header := range results.Headers {
-				rowData[i] = row.data[header]
+				rowData[i] = row.data.Get(header).AsString()
 			}
 			fmt.Print("| ")
 			fmt.Print(strings.Join(rowData, " | "))
@@ -292,7 +292,7 @@ func fillTableData(table *tablewriter.Table, results ResultSet) {
 	for _, row := range results.Rows {
 		rowData := make([]string, len(results.Headers))
 		for i, header := range results.Headers {
-			rowData[i] = row.data[header]
+			rowData[i] = row.data.Get(header).AsString()
 		}
 		table.Append(rowData)
 	}
@@ -374,31 +374,13 @@ func main() {
 		Headers: []string{},
 		Rows:    []Result{},
 	}
-	headerMap := make(map[string]bool)
 
 	// First pass to collect all possible headers
-	store.PrepareQuery(query).ForEach(ctx, func(entity *qdata.Entity) bool {
-		row := make(map[string]string)
-
-		// Initialize all fields to empty strings
-		for _, header := range results.Headers {
-			row[header] = ""
-		}
-
-		// Fill in values for fields that exist
-		for _, field := range entity.Fields {
-			headerMap[field.FieldType.AsString()] = true
-			row[field.FieldType.AsString()] = field.Value.AsString()
-		}
-
+	store.PrepareQuery(query).ForEach(ctx, func(row qdata.QueryRow) bool {
+		results.Headers = row.Columns()
 		results.Rows = append(results.Rows, Result{data: row})
 		return true
 	})
-
-	// Convert header map to slice
-	for header := range headerMap {
-		results.Headers = append(results.Headers, header)
-	}
 
 	// Display results in selected format
 	displayResults(results)

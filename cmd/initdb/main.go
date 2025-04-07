@@ -468,7 +468,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil
 	}
 
-	iterator := store.PrepareQuery("SELECT Name FROM Root WHERE Name = %q", path[0])
+	iterator := store.PrepareQuery("SELECT $EntityId FROM Root WHERE Name = %q", path[0])
 	defer iterator.Close()
 	var currentNode *qdata.Entity
 	if !iterator.Next(ctx) {
@@ -481,7 +481,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 			return nil
 		}
 	} else {
-		currentNode = iterator.Get()
+		currentNode = iterator.Get().AsEntity()
 	}
 
 	// Create the last item in the path
