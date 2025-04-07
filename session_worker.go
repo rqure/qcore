@@ -184,7 +184,8 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 func (me *sessionWorker) OnReady(ctx context.Context) {
 	me.isReady = true
 
-	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(ctx, func(sessionController *qdata.Entity) bool {
+	me.store.PrepareQuery("SELECT $EntityId, LastEventTime FROM SessionController").ForEach(ctx, func(row qdata.QueryRow) bool {
+		sessionController := row.AsEntity()
 		lastEventTime := sessionController.Field("LastEventTime").Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
 		return true
@@ -196,7 +197,8 @@ func (me *sessionWorker) OnNotReady(context.Context) {
 }
 
 func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
-	me.store.PrepareQuery("SELECT LastEventTime FROM SessionController").ForEach(e.Ctx, func(sessionController *qdata.Entity) bool {
+	me.store.PrepareQuery("SELECT $EntityId, LastEventTime FROM SessionController").ForEach(e.Ctx, func(row qdata.QueryRow) bool {
+		sessionController := row.AsEntity()
 		sessionController.Field("LastEventTime").Value.SetTimestamp(time.Now())
 		me.store.Write(e.Ctx, sessionController.Field("LastEventTime").AsWriteRequest())
 		return true

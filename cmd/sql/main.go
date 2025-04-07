@@ -38,18 +38,28 @@ const (
 
 var (
 	postgresAddr string
+	natsAddr     string
+	backend      string
 	timeout      int
 	logLevel     string
 	libLogLevel  string
 	outputFormat string
+	cacheType    string
+	cacheAddr    string
+	cacheTTL     time.Duration
 )
 
 func init() {
+	flag.StringVar(&backend, "backend", "postgres", "Backend type (postgres, nats)")
 	flag.StringVar(&postgresAddr, "postgres", getEnvOrDefault("Q_POSTGRES_ADDR", defaultPostgresAddr), "PostgreSQL connection string")
+	flag.StringVar(&natsAddr, "nats", getEnvOrDefault("Q_NATS_ADDR", "nats://localhost:4222"), "NATS connection string")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&outputFormat, "format", "table", "Output format (table, plain, unicode, unicodelight, unicodebold, colon, csv, github, json, xml)")
+	flag.StringVar(&cacheType, "cache", "", "Cache type for postgres (none, redis, memcached)")
+	flag.StringVar(&cacheAddr, "cache-addr", "", "Cache server address")
+	flag.DurationVar(&cacheTTL, "cache-ttl", 5*time.Minute, "Cache TTL duration")
 	flag.Parse()
 }
 
@@ -300,9 +310,31 @@ func main() {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	// Create and connect store
-	store := new(qdata.Store).Init(
-		qstore.PersistOverPostgres(postgresAddr))
+	// Create and connect store based on backend type
+	var storeOpts qdata.StoreOpts
+	switch backend {
+	case "postgres":
+		opts := []func(*qstore.PostgresOptions){}
+
+		// Configure cache if requested
+		if cacheType != "" && cacheAddr != "" {
+			switch cacheType {
+			case "redis":
+				opts = append(opts, qstore.WithRedisCacheFromURL(cacheAddr, cacheTTL))
+			case "memcached":
+				opts = append(opts, qstore.WithMemcachedCache(cacheAddr, cacheTTL))
+			}
+		}
+
+		storeOpts = qstore.PersistOverPostgres(postgresAddr, opts...)
+	case "nats":
+		storeOpts = qstore.CommunicateOverNats(natsAddr)
+	default:
+		qlog.Error("Unsupported backend: %s", backend)
+		os.Exit(1)
+	}
+
+	store := new(qdata.Store).Init(storeOpts)
 	store.Connect(ctx)
 	defer store.Disconnect(ctx)
 

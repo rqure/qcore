@@ -313,8 +313,9 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 		found := false
 		w.store.
-			PrepareQuery("SELECT Name FROM User WHERE Name = %q", accessorName).
-			ForEach(ctx, func(user *qdata.Entity) bool {
+			PrepareQuery("SELECT $EntityId FROM User WHERE Name = %q", accessorName).
+			ForEach(ctx, func(row qdata.QueryRow) bool {
+				user := row.AsEntity()
 				w.store.Read(
 					context.WithValue(
 						ctx,
@@ -330,8 +331,9 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 		if !found {
 			w.store.
-				PrepareQuery("SELECT Name FROM Client WHERE Name = %q", accessorName).
-				ForEach(ctx, func(client *qdata.Entity) bool {
+				PrepareQuery("SELECT $EntityId FROM Client WHERE Name = %q", accessorName).
+				ForEach(ctx, func(row qdata.QueryRow) bool {
+					client := row.AsEntity()
 					w.store.Read(
 						context.WithValue(
 							ctx,
@@ -377,7 +379,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	for _, hint := range req.TypeHints {
 		opts = append(opts,
 			qdata.TypeHint(
-				qdata.FieldType(hint.FieldType),
+				hint.FieldType,
 				qdata.ValueType(hint.ValueType),
 			),
 		)
@@ -390,6 +392,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 		req.Query,
 		opts...,
 	)
+	defer iterator.Close()
 
 	pageResult, err := iterator.NextPage(ctx)
 	if err != nil {
@@ -399,9 +402,9 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	}
 
 	// Convert the results to protobuf format
-	rsp.Entities = make([]*qprotobufs.DatabaseEntity, 0, len(pageResult.Items))
-	for _, entity := range pageResult.Items {
-		rsp.Entities = append(rsp.Entities, entity.AsEntityPb())
+	rsp.Rows = make([]*qprotobufs.QueryRow, 0, len(pageResult.Items))
+	for _, row := range pageResult.Items {
+		rsp.Rows = append(rsp.Rows, row.AsQueryRowPb())
 	}
 
 	rsp.NextCursor = pageResult.CursorId
