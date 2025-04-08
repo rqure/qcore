@@ -103,7 +103,15 @@ type XMLResultSet struct {
 func displayResults(results ResultSet) {
 	switch strings.ToLower(outputFormat) {
 	case formatJSON:
-		jsonData, err := json.MarshalIndent(results, "", "  ")
+		jsonResults := make([]map[string]interface{}, len(results.Rows))
+		for i, row := range results.Rows {
+			rowMap := make(map[string]interface{})
+			for _, header := range results.Headers {
+				rowMap[header] = row.data.Get(header).GetRaw()
+			}
+			jsonResults[i] = rowMap
+		}
+		jsonData, err := json.MarshalIndent(jsonResults, "", "  ")
 		if err != nil {
 			qlog.Error("Error marshaling JSON: %s", err.Error())
 			return
@@ -376,11 +384,13 @@ func main() {
 	}
 
 	// First pass to collect all possible headers
+	start := time.Now()
 	store.PrepareQuery(query).ForEach(ctx, func(row qdata.QueryRow) bool {
-		results.Headers = row.Columns()
+		results.Headers = row.Selected()
 		results.Rows = append(results.Rows, Result{data: row})
 		return true
 	})
+	qlog.Trace("Query executed in %s", time.Since(start))
 
 	// Display results in selected format
 	displayResults(results)
