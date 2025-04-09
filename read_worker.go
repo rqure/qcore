@@ -128,6 +128,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	}
 
 	paginatedResult := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
+	defer paginatedResult.Cleanup()
 	pageResult, err := paginatedResult.NextPage(ctx)
 	if err != nil {
 		qlog.Error("Error fetching entity types: %v", err)
@@ -201,7 +202,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	iterator := w.store.FindEntities(qdata.EntityType(req.EntityType),
 		qdata.POPageSize(pageSize),
 		qdata.POCursorId(req.Cursor))
-
+	defer iterator.Close()
 	pageResult, err := iterator.NextPage(ctx)
 	if err != nil {
 		qlog.Error("Error fetching entities: %v", err)
