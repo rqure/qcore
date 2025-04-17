@@ -1,67 +1,28 @@
 package main
 
 import (
-	"os"
-	"time"
-
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
-	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 )
 
-func getPostgresAddress() string {
-	addr := os.Getenv("Q_POSTGRES_ADDR")
-	if addr == "" {
-		// Use qcore user and qstore database directly in the default connection string
-		addr = "postgres://qcore:qcore@postgres:5432/qstore?sslmode=disable"
-	}
-	return addr
-}
-
-func getNatsAddress() string {
-	addr := os.Getenv("Q_NATS_ADDR")
-	if addr == "" {
-		addr = "nats://nats:4222"
-	}
-
-	return addr
-}
-
 func main() {
-	natsCore := qnats.NewCore(qnats.NatsConfig{Address: getNatsAddress()})
+	natsCore := qnats.NewCore(qnats.NatsConfig{Address: qstore.DefaultNatsAddress()})
 	notificationManager := NewNotificationManager(natsCore)
 
-	s := new(qdata.Store).Init(
-		qstore.PersistOverPostgres(
-			getPostgresAddress(),
-			qstore.WithMemcachedCache("memcached:11211", 5*time.Minute)),
-		func(store *qdata.Store) {
-			if store.StoreConnector == nil {
-				store.StoreConnector = qstore.NewMultiConnector()
-			}
+	store := qstore.New2(natsCore)
 
-			if connector, ok := store.StoreConnector.(qstore.MultiConnector); ok {
-				connector.AddConnector(qnats.NewConnector(natsCore))
-			} else {
-				store.StoreConnector = qnats.NewConnector(natsCore)
-			}
-
-			store.StoreNotifier = qnats.NewStoreNotifier(natsCore)
-		},
-	)
-
-	storeWorker := qworkers.NewStore(s)
+	storeWorker := qworkers.NewStore(store)
 	modeManager := NewModeManager()
 
-	readWorker := NewReadWorker(s, natsCore, modeManager)
-	writeWorker := NewWriteWorker(s, natsCore, modeManager)
-	notificationWorker := NewNotificationWorker(s, natsCore, modeManager, notificationManager)
-	sessionWorker := NewSessionWorker(s, modeManager)
+	readWorker := NewReadWorker(store, natsCore, modeManager)
+	writeWorker := NewWriteWorker(store, natsCore, modeManager)
+	notificationWorker := NewNotificationWorker(store, natsCore, modeManager, notificationManager)
+	sessionWorker := NewSessionWorker(store, modeManager)
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
-	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, s))
+	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, store))
 	readinessWorker.AddCriteria(NewSessionReadyCriteria(sessionWorker))
 
 	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)

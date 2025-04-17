@@ -50,13 +50,11 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 	w.handle.DoInMainThread(func(ctx context.Context) {
 		var apiMsg qprotobufs.ApiMessage
 		if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-			qlog.Error("Could not unmarshal message: %v", err)
+			qlog.Warn("Could not unmarshal message: %v", err)
 			return
 		}
 
 		switch {
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntityRequest{}):
-			w.handleGetEntity(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
 			w.handleGetEntityTypes(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
@@ -79,44 +77,12 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 	})
 }
 
-func (w *readWorker) handleGetEntity(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
-	req := new(qprotobufs.ApiConfigGetEntityRequest)
-	rsp := new(qprotobufs.ApiConfigGetEntityResponse)
-
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
-		rsp.Status = qprotobufs.ApiConfigGetEntityResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-
-	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
-		rsp.Status = qprotobufs.ApiConfigGetEntityResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-
-	ent := w.store.GetEntity(ctx, qdata.EntityId(req.Id))
-	if ent == nil {
-		qlog.Error("Could not get entity")
-		rsp.Status = qprotobufs.ApiConfigGetEntityResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-
-	rsp.Entity = ent.AsEntityPb()
-	rsp.Status = qprotobufs.ApiConfigGetEntityResponse_SUCCESS
-
-	w.sendResponse(msg, rsp)
-}
-
 func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
 	req := new(qprotobufs.ApiRuntimeGetEntityTypesRequest)
 	rsp := new(qprotobufs.ApiRuntimeGetEntityTypesResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -127,11 +93,11 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 		pageSize = 100
 	}
 
-	paginatedResult := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
-	defer paginatedResult.Cleanup()
-	pageResult, err := paginatedResult.NextPage(ctx)
+	iter, err := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
+	defer iter.Close()
+	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
-		qlog.Error("Error fetching entity types: %v", err)
+		qlog.Warn("Error fetching entity types: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -147,14 +113,14 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	rsp := new(qprotobufs.ApiConfigGetEntitySchemaResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	schema := w.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
-	if schema == nil {
-		qlog.Error("Schema not found")
+	schema, err := w.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
+	if err != nil {
+		qlog.Warn("Could not get entity schema: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -170,12 +136,20 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 	rsp := new(qprotobufs.ApiConfigGetRootResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	w.store.FindEntities("Root").ForEach(ctx, func(entityId qdata.EntityId) bool {
+	iter, err := w.store.FindEntities("Root")
+	if err != nil {
+		qlog.Warn("Could not find root entity: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+	defer iter.Close()
+
+	iter.ForEach(ctx, func(entityId qdata.EntityId) bool {
 		rsp.RootId = entityId.AsString()
 		return false // Break after first root
 	})
@@ -188,7 +162,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	rsp := new(qprotobufs.ApiRuntimeFindEntitiesResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -199,13 +173,19 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 		pageSize = 100 // default page size
 	}
 
-	iterator := w.store.FindEntities(qdata.EntityType(req.EntityType),
+	iter, err := w.store.FindEntities(qdata.EntityType(req.EntityType),
 		qdata.POPageSize(pageSize),
 		qdata.POCursorId(req.Cursor))
-	defer iterator.Close()
-	pageResult, err := iterator.NextPage(ctx)
 	if err != nil {
-		qlog.Error("Error fetching entities: %v", err)
+		qlog.Warn("Error fetching entities: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+	defer iter.Close()
+
+	pageResult, err := iter.NextPage(ctx)
+	if err != nil {
+		qlog.Warn("Error fetching entities: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -227,15 +207,20 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 	rsp := new(qprotobufs.ApiRuntimeFieldExistsResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	exists := w.store.FieldExists(
+	exists, err := w.store.FieldExists(
 		ctx,
 		qdata.EntityType(req.EntityType),
 		qdata.FieldType(req.FieldName))
+	if err != nil {
+		qlog.Warn("Could not check field existence: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
 
 	rsp.Exists = exists
 
@@ -252,7 +237,13 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 		return
 	}
 
-	exists := w.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
+	exists, err := w.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
+	if err != nil {
+		qlog.Error("Could not check entity existence: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
 	rsp.Exists = exists
 
 	w.sendResponse(msg, rsp)
@@ -308,43 +299,48 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 		accessorName, err := accessorSession.GetOwnerName(ctx)
 		if err != nil {
-			qlog.Error("Could not get owner name: %v", err)
+			qlog.Warn("Could not get owner name: %v", err)
 			return
 		}
 
 		found := false
-		w.store.
-			PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName).
-			ForEach(ctx, func(row qdata.QueryRow) bool {
-				user := row.AsEntity()
+		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
+		if err != nil {
+			qlog.Warn("Could not prepare query: %v", err)
+			return
+		}
+		defer iter.Close()
+
+		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+			user := row.AsEntity()
+			w.store.Read(
+				context.WithValue(
+					ctx,
+					qcontext.KeyAuthorizer,
+					qauthorization.NewAuthorizer(user.EntityId, w.store)),
+				reqs...)
+
+			found = true
+
+			// Break after first user
+			return false
+		})
+
+		if !found {
+			iter, err = w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
+
+			iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+				client := row.AsEntity()
 				w.store.Read(
 					context.WithValue(
 						ctx,
 						qcontext.KeyAuthorizer,
-						qauthorization.NewAuthorizer(user.EntityId, w.store)),
+						qauthorization.NewAuthorizer(client.EntityId, w.store)),
 					reqs...)
 
-				found = true
-
-				// Break after first user
+				// Break after first client
 				return false
 			})
-
-		if !found {
-			w.store.
-				PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName).
-				ForEach(ctx, func(row qdata.QueryRow) bool {
-					client := row.AsEntity()
-					w.store.Read(
-						context.WithValue(
-							ctx,
-							qcontext.KeyAuthorizer,
-							qauthorization.NewAuthorizer(client.EntityId, w.store)),
-						reqs...)
-
-					// Break after first client
-					return false
-				})
 		}
 	}
 
@@ -389,15 +385,15 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	opts = append(opts, qdata.POCursorId(req.Cursor))
 
 	// Prepare and execute the query with pagination
-	iterator := w.store.PrepareQuery(
+	iter, err := w.store.PrepareQuery(
 		req.Query,
 		opts...,
 	)
-	defer iterator.Close()
+	defer iter.Close()
 
-	pageResult, err := iterator.NextPage(ctx)
+	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
-		qlog.Error("Error executing query: %v", err)
+		qlog.Warn("Error executing query: %v", err)
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -427,18 +423,18 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	var err error
 	apiMsg.Payload, err = anypb.New(response)
 	if err != nil {
-		qlog.Error("Could not marshal response: %v", err)
+		qlog.Warn("Could not marshal response: %v", err)
 		return
 	}
 
 	data, err := proto.Marshal(apiMsg)
 	if err != nil {
-		qlog.Error("Could not marshal message: %v", err)
+		qlog.Warn("Could not marshal message: %v", err)
 		return
 	}
 
 	if err := msg.Respond(data); err != nil {
-		qlog.Error("Could not send response: %v", err)
+		qlog.Warn("Could not send response: %v", err)
 	}
 }
 

@@ -48,9 +48,9 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 	changed := args.Prev.Value != args.Curr.Value
 
 	resolver := qdata.NewIndirectionResolver(me.store)
-	indirectEntity, indirectField := resolver.Resolve(args.Ctx, args.Curr.EntityId, args.Curr.FieldType)
+	indirectEntity, _, err := resolver.Resolve(args.Ctx, args.Curr.EntityId, args.Curr.FieldType)
 
-	if indirectField == "" || indirectEntity == "" {
+	if err != nil {
 		qlog.Error("Failed to resolve indirection: %v", args.Curr)
 		return
 	}
@@ -93,12 +93,7 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 		}
 	}
 
-	fetchedEntity := me.store.GetEntity(args.Ctx, indirectEntity)
-	if fetchedEntity == nil {
-		qlog.Error("Failed to get entity: %v (indirect=%v)", args.Curr.EntityId, indirectEntity)
-		return
-	}
-
+	fetchedEntity := new(qdata.Entity).Init(indirectEntity)
 	typeLeases := me.getEntityLeases(fetchedEntity.EntityType.AsString())
 
 	for _, lease := range typeLeases {
