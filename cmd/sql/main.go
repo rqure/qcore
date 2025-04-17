@@ -37,9 +37,6 @@ const (
 )
 
 var (
-	postgresAddr string
-	natsAddr     string
-	backend      string
 	timeout      int
 	logLevel     string
 	libLogLevel  string
@@ -50,9 +47,6 @@ var (
 )
 
 func init() {
-	flag.StringVar(&backend, "backend", "postgres", "Backend type (postgres, nats)")
-	flag.StringVar(&postgresAddr, "postgres", getEnvOrDefault("Q_POSTGRES_ADDR", defaultPostgresAddr), "PostgreSQL connection string")
-	flag.StringVar(&natsAddr, "nats", getEnvOrDefault("Q_NATS_ADDR", "nats://localhost:4222"), "NATS connection string")
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
 	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
@@ -318,31 +312,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	// Create and connect store based on backend type
-	var storeOpts qdata.StoreOpts
-	switch backend {
-	case "postgres":
-		opts := []func(*qstore.PostgresOptions){}
-
-		// Configure cache if requested
-		if cacheType != "" && cacheAddr != "" {
-			switch cacheType {
-			case "redis":
-				opts = append(opts, qstore.WithRedisCacheFromURL(cacheAddr, cacheTTL))
-			case "memcached":
-				opts = append(opts, qstore.WithMemcachedCache(cacheAddr, cacheTTL))
-			}
-		}
-
-		storeOpts = qstore.PersistOverPostgres(postgresAddr, opts...)
-	case "nats":
-		storeOpts = qstore.CommunicateOverNats(natsAddr)
-	default:
-		qlog.Error("Unsupported backend: %s", backend)
-		os.Exit(1)
-	}
-
-	store := new(qdata.Store).Init(storeOpts)
+	store := qstore.New()
 	store.Connect(ctx)
 	defer store.Disconnect(ctx)
 
@@ -385,7 +355,14 @@ func main() {
 
 	// First pass to collect all possible headers
 	start := time.Now()
-	store.PrepareQuery(query).ForEach(ctx, func(row qdata.QueryRow) bool {
+	iter, err := store.PrepareQuery(query)
+	if err != nil {
+		qlog.Error("Failed to prepare query: %s", err.Error())
+		os.Exit(1)
+	}
+	defer iter.Close()
+
+	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
 		results.Headers = row.Selected()
 		results.Rows = append(results.Rows, Result{data: row})
 		return true

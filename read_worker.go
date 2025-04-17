@@ -94,6 +94,12 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	}
 
 	iter, err := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
+	if err != nil {
+		qlog.Warn("Error fetching entity types: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
+
 	defer iter.Close()
 	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
@@ -328,6 +334,11 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 		if !found {
 			iter, err = w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
+			if err != nil {
+				qlog.Warn("Could not prepare query: %v", err)
+				return
+			}
+			defer iter.Close()
 
 			iter.ForEach(ctx, func(row qdata.QueryRow) bool {
 				client := row.AsEntity()
@@ -389,6 +400,11 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 		req.Query,
 		opts...,
 	)
+	if err != nil {
+		qlog.Warn("Error preparing query: %v", err)
+		w.sendResponse(msg, rsp)
+		return
+	}
 	defer iter.Close()
 
 	pageResult, err := iter.NextPage(ctx)

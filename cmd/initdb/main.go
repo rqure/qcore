@@ -66,9 +66,6 @@ func main() {
 
 	// Drop both databases first
 	qlog.Info("Dropping existing databases...")
-	if err := dropQStoreDatabase(ctx, pool); err != nil {
-		qlog.Error("Failed to drop qstore database: %v", err)
-	}
 	if err := dropKeycloakDatabase(ctx, pool); err != nil {
 		qlog.Error("Failed to drop keycloak database: %v", err)
 	}
@@ -77,10 +74,6 @@ func main() {
 	qlog.Info("Creating and initializing databases...")
 	if err := createKeycloakDatabase(ctx, pool); err != nil {
 		qlog.Error("Failed to create keycloak database: %v", err)
-	}
-
-	if err := createQStoreDatabase(ctx, pool); err != nil {
-		qlog.Error("Failed to create qstore database: %v", err)
 	}
 
 	if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "qinitdb")); err != nil {
@@ -113,109 +106,6 @@ func setLogLevel(appLevel, libLevel string) {
 		qlog.Warn("Invalid lib log level '%s', using INFO", libLevel)
 		qlog.SetLibLevel(qlog.INFO)
 	}
-}
-
-func createQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
-	// Check if qstore database exists
-	var dbExists bool
-	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'qstore')").Scan(&dbExists)
-	if err != nil {
-		return fmt.Errorf("failed to check if qstore database exists: %w", err)
-	}
-
-	if dbExists {
-		qlog.Info("qstore database already exists")
-	} else {
-		// Create qstore database
-		_, err = pool.Exec(ctx, "CREATE DATABASE qstore")
-		if err != nil {
-			return fmt.Errorf("failed to create qstore database: %w", err)
-		}
-		qlog.Info("qstore database created")
-	}
-
-	// Create qcore user if it doesn't exist
-	_, err = pool.Exec(ctx, `
-		DO $$
-		BEGIN
-			IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'qcore') THEN
-				CREATE USER qcore WITH PASSWORD 'qcore';
-			ELSE
-				ALTER USER qcore WITH PASSWORD 'qcore';
-			END IF;
-		END
-		$$;
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create qcore user: %w", err)
-	}
-	qlog.Info("qcore user created/updated")
-
-	// Grant privileges to qcore user on the qstore database
-	_, err = pool.Exec(ctx, "GRANT ALL PRIVILEGES ON DATABASE qstore TO qcore")
-	if err != nil {
-		return fmt.Errorf("failed to grant privileges to qcore user: %w", err)
-	}
-	qlog.Info("privileges granted to qcore user")
-
-	// Connect to the qstore database specifically to grant schema permissions
-	qstoreConnString := strings.Replace(postgresAddr, "/postgres?", "/qstore?", 1)
-	qstorePool, err := pgxpool.New(ctx, qstoreConnString)
-	if err != nil {
-		return fmt.Errorf("failed to connect to qstore database: %w", err)
-	}
-	defer qstorePool.Close()
-
-	// Grant schema permissions to qcore user
-	_, err = qstorePool.Exec(ctx, "GRANT ALL ON SCHEMA public TO qcore")
-	if err != nil {
-		return fmt.Errorf("failed to grant schema permissions to qcore user: %w", err)
-	}
-	qlog.Info("schema permissions granted to qcore user")
-
-	// Set qcore user as owner of public schema in qstore database
-	_, err = qstorePool.Exec(ctx, "ALTER SCHEMA public OWNER TO qcore")
-	if err != nil {
-		return fmt.Errorf("failed to set schema owner: %w", err)
-	}
-	qlog.Info("schema ownership set for qcore user")
-
-	return nil
-}
-
-func dropQStoreDatabase(ctx context.Context, pool *pgxpool.Pool) error {
-	// Check if qstore database exists
-	var dbExists bool
-	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'qstore')").Scan(&dbExists)
-	if err != nil {
-		return fmt.Errorf("failed to check if qstore database exists: %w", err)
-	}
-
-	if !dbExists {
-		qlog.Info("qstore database doesn't exist, nothing to drop")
-		return nil
-	}
-
-	// Terminate active connections to the database
-	_, err = pool.Exec(ctx, `
-		SELECT pg_terminate_backend(pg_stat_activity.pid)
-		FROM pg_stat_activity
-		WHERE pg_stat_activity.datname = 'qstore'
-		AND pid <> pg_backend_pid()
-	`)
-	if err != nil {
-		qlog.Warn("Failed to terminate connections to qstore database: %v", err)
-		// Continue anyway
-	}
-
-	// Drop qstore database
-	_, err = pool.Exec(ctx, "DROP DATABASE qstore")
-	if err != nil {
-		return fmt.Errorf("failed to drop qstore database: %w", err)
-	}
-
-	qlog.Info("qstore database dropped")
-	return nil
 }
 
 func createKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
@@ -322,14 +212,8 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func initializeQStoreSchema(ctx context.Context) error {
-	// Connect to qstore database using the store interface
-	qstoreConnString := strings.Replace(postgresAddr, "/postgres?", "/qstore?", 1)
-	// Use qcore credentials for connecting
-	qstoreConnString = strings.Replace(qstoreConnString, "postgres:postgres", "qcore:qcore", 1)
-
 	// Create a store instance to interact with the database
-	s := new(qdata.Store).Init(
-		qstore.PersistOverPostgres(qstoreConnString))
+	s := qstore.New()
 
 	// Connect to the database
 	s.Connect(ctx)
@@ -448,9 +332,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 
 // Helper functions moved from init_store_worker
 func ensureEntitySchema(ctx context.Context, s *qdata.Store, schema *qdata.EntitySchema) {
-	actualSchema := s.GetEntitySchema(ctx, schema.EntityType)
-	if actualSchema != nil {
-		// Otherwise adding any missing fields to the actual schema
+	actualSchema, err := s.GetEntitySchema(ctx, schema.EntityType)
+	if err == nil {
 		for _, field := range schema.Fields {
 			actualSchema.Fields[field.FieldType] = field
 		}
@@ -468,20 +351,29 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil
 	}
 
-	iterator := store.PrepareQuery(`SELECT "$EntityId" FROM Root WHERE Name = %q`, path[0])
-	defer iterator.Close()
+	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root WHERE Name = %q`, path[0])
+	if err != nil {
+		qlog.Error("Failed to prepare query: %v", err)
+		return nil
+	}
+	defer iter.Close()
+
 	var currentNode *qdata.Entity
-	if !iterator.Next(ctx) {
+	if !iter.Next(ctx) {
 		if entityType == qdata.ETRoot {
 			qlog.Info("Creating %s entity '%s'", qdata.ETRoot, path[0])
-			rootId := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
-			return new(qdata.Entity).Init(rootId)
+			root, err := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
+			if err != nil {
+				qlog.Warn("Failed to create root entity: %v", err)
+				return nil
+			}
+			return new(qdata.Entity).Init(root.EntityId)
 		} else {
 			qlog.Error("Root entity not found")
 			return nil
 		}
 	} else {
-		currentNode = iterator.Get().AsEntity()
+		currentNode = iter.Get().AsEntity()
 	}
 
 	// Create the last item in the path
@@ -509,8 +401,12 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 
 		if !found && i == lastIndex {
 			qlog.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
-			entityId := store.CreateEntity(ctx, entityType, currentNode.EntityId, name)
-			return new(qdata.Entity).Init(entityId)
+			et, err := store.CreateEntity(ctx, entityType, currentNode.EntityId, name)
+			if err != nil {
+				qlog.Error("Failed to create entity '%s': %v", name, err)
+				return nil
+			}
+			return new(qdata.Entity).Init(et.EntityId)
 		} else if !found {
 			qlog.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
 			return nil

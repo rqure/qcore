@@ -102,13 +102,19 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
-	id := w.store.CreateEntity(
+	entity, err := w.store.CreateEntity(
 		ctx,
 		qdata.EntityType(req.Type),
 		qdata.EntityId(req.ParentId),
 		req.Name)
+	if err != nil {
+		qlog.Error("Could not create entity: %v", err)
+		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
 
-	rsp.Id = id.AsString()
+	rsp.Id = entity.EntityId.AsString()
 	rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -227,38 +233,47 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		}
 
 		found := false
-		w.store.
-			PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName).
-			ForEach(ctx, func(row qdata.QueryRow) bool {
-				user := row.AsEntity()
+		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
+		if err != nil {
+			qlog.Warn("Could not prepare query: %v", err)
+			return
+		}
+		defer iter.Close()
+		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+			user := row.AsEntity()
+			w.store.Write(
+				context.WithValue(
+					ctx,
+					qcontext.KeyAuthorizer,
+					qauthorization.NewAuthorizer(user.EntityId, w.store)),
+				reqs...)
+
+			found = true
+
+			// Break after first user
+			return false
+		})
+
+		if !found {
+			iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
+			if err != nil {
+				qlog.Warn("Could not prepare query: %v", err)
+				return
+			}
+			defer iter.Close()
+
+			iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+				client := row.AsEntity()
 				w.store.Write(
 					context.WithValue(
 						ctx,
 						qcontext.KeyAuthorizer,
-						qauthorization.NewAuthorizer(user.EntityId, w.store)),
+						qauthorization.NewAuthorizer(client.EntityId, w.store)),
 					reqs...)
 
-				found = true
-
-				// Break after first user
+				// Break after first client
 				return false
 			})
-
-		if !found {
-			w.store.
-				PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName).
-				ForEach(ctx, func(row qdata.QueryRow) bool {
-					client := row.AsEntity()
-					w.store.Write(
-						context.WithValue(
-							ctx,
-							qcontext.KeyAuthorizer,
-							qauthorization.NewAuthorizer(client.EntityId, w.store)),
-						reqs...)
-
-					// Break after first client
-					return false
-				})
 		}
 	}
 
