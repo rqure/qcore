@@ -47,6 +47,11 @@ func (me *modeManager) HasModes(modes ...Mode) bool {
 
 func (me *modeManager) loadModes() {
 	modesEnv := os.Getenv("Q_MODES")
+
+	if modesEnv == "" {
+		modesEnv = string(ModeRead) + "," + string(ModeWrite)
+	}
+
 	strings.Split(modesEnv, ",")
 	for _, mode := range strings.Split(modesEnv, ",") {
 		mode = strings.ToLower(mode)

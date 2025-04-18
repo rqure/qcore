@@ -6,7 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/nats-io/nats.go v1.39.1
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/rqure/qlib v0.1.84
+	github.com/rqure/qlib v0.1.85
 	google.golang.org/protobuf v1.36.5
 )
 
