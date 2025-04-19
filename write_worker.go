@@ -65,7 +65,7 @@ func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
 	w.handle.DoInMainThread(func(ctx context.Context) {
 		var apiMsg qprotobufs.ApiMessage
 		if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-			qlog.Error("Could not unmarshal message: %v", err)
+			qlog.Warn("Could not unmarshal message: %v", err)
 			return
 		}
 
@@ -89,14 +89,14 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 	rsp := new(qprotobufs.ApiConfigCreateEntityResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
@@ -108,7 +108,7 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 		qdata.EntityId(req.ParentId),
 		req.Name)
 	if err != nil {
-		qlog.Error("Could not create entity: %v", err)
+		qlog.Warn("Could not create entity: %v", err)
 		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
@@ -124,20 +124,26 @@ func (w *writeWorker) handleDeleteEntity(ctx context.Context, msg *nats.Msg, api
 	rsp := new(qprotobufs.ApiConfigDeleteEntityResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	w.store.DeleteEntity(ctx, qdata.EntityId(req.Id))
+	if err := w.store.DeleteEntity(ctx, qdata.EntityId(req.Id)); err != nil {
+		qlog.Warn("Could not delete entity: %v", err)
+		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+
 	rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -147,20 +153,26 @@ func (w *writeWorker) handleSetEntitySchema(ctx context.Context, msg *nats.Msg, 
 	rsp := new(qprotobufs.ApiConfigSetEntitySchemaResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	w.store.SetEntitySchema(ctx, new(qdata.EntitySchema).FromEntitySchemaPb(req.Schema))
+	if err := w.store.SetEntitySchema(ctx, new(qdata.EntitySchema).FromEntitySchemaPb(req.Schema)); err != nil {
+		qlog.Warn("Could not set entity schema: %v", err)
+		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+
 	rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -170,20 +182,26 @@ func (w *writeWorker) handleRestoreSnapshot(ctx context.Context, msg *nats.Msg, 
 	rsp := new(qprotobufs.ApiConfigRestoreSnapshotResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	w.store.RestoreSnapshot(ctx, new(qdata.Snapshot).FromSnapshotPb(req.Snapshot))
+	if err := w.store.RestoreSnapshot(ctx, new(qdata.Snapshot).FromSnapshotPb(req.Snapshot)); err != nil {
+		qlog.Warn("Could not restore snapshot: %v", err)
+		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+
 	rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
@@ -193,19 +211,22 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 	rsp := new(qprotobufs.ApiRuntimeDatabaseResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle request %v. Database is not connected.", req)
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if req.RequestType != qprotobufs.ApiRuntimeDatabaseRequest_WRITE {
-		qlog.Error("Only WRITE requests are supported")
+		qlog.Warn("Only WRITE requests are supported")
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -223,12 +244,16 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 
 		if !accessorSession.IsValid(ctx) {
 			qlog.Warn("Invalid session")
+			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+			w.sendResponse(msg, rsp)
 			return
 		}
 
 		accessorName, err := accessorSession.GetOwnerName(ctx)
 		if err != nil {
-			qlog.Error("Could not get owner name: %v", err)
+			qlog.Warn("Could not get owner name: %v", err)
+			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+			w.sendResponse(msg, rsp)
 			return
 		}
 
@@ -236,6 +261,8 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
 		if err != nil {
 			qlog.Warn("Could not prepare query: %v", err)
+			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+			w.sendResponse(msg, rsp)
 			return
 		}
 		defer iter.Close()
@@ -258,6 +285,8 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 			iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
 			if err != nil {
 				qlog.Warn("Could not prepare query: %v", err)
+				rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+				w.sendResponse(msg, rsp)
 				return
 			}
 			defer iter.Close()
@@ -278,6 +307,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 	}
 
 	rsp.Response = req.Requests
+	rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -295,17 +325,17 @@ func (w *writeWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 	var err error
 	apiMsg.Payload, err = anypb.New(response)
 	if err != nil {
-		qlog.Error("Could not marshal response: %v", err)
+		qlog.Warn("Could not marshal response: %v", err)
 		return
 	}
 
 	data, err := proto.Marshal(apiMsg)
 	if err != nil {
-		qlog.Error("Could not marshal message: %v", err)
+		qlog.Warn("Could not marshal message: %v", err)
 		return
 	}
 
 	if err := msg.Respond(data); err != nil {
-		qlog.Error("Could not send response: %v", err)
+		qlog.Warn("Could not send response: %v", err)
 	}
 }

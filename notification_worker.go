@@ -59,7 +59,7 @@ func (me *notificationWorker) OnBeforeStoreConnected(args qdata.ConnectedArgs) {
 func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
 	var apiMsg qprotobufs.ApiMessage
 	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-		qlog.Error("Could not unmarshal message: %v", err)
+		qlog.Warn("Could not unmarshal message: %v", err)
 		return
 	}
 
@@ -77,7 +77,8 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 	rsp := new(qprotobufs.ApiRuntimeRegisterNotificationResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_FAILURE
 		me.sendResponse(msg, rsp)
 		return
 	}
@@ -88,6 +89,7 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
 	}
 
+	rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_SUCCESS
 	me.sendResponse(msg, rsp)
 }
 
@@ -96,7 +98,8 @@ func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg
 	rsp := new(qprotobufs.ApiRuntimeUnregisterNotificationResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_FAILURE
 		me.sendResponse(msg, rsp)
 		return
 	}
@@ -123,17 +126,17 @@ func (me *notificationWorker) sendResponse(msg *nats.Msg, response proto.Message
 	var err error
 	apiMsg.Payload, err = anypb.New(response)
 	if err != nil {
-		qlog.Error("Could not marshal response: %v", err)
+		qlog.Warn("Could not marshal response: %v", err)
 		return
 	}
 
 	data, err := proto.Marshal(apiMsg)
 	if err != nil {
-		qlog.Error("Could not marshal message: %v", err)
+		qlog.Warn("Could not marshal message: %v", err)
 		return
 	}
 
 	if err := msg.Respond(data); err != nil {
-		qlog.Error("Could not send response: %v", err)
+		qlog.Warn("Could not send response: %v", err)
 	}
 }

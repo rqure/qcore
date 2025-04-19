@@ -83,6 +83,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -96,6 +97,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	iter, err := w.store.GetEntityTypes(qdata.POPageSize(pageSize), qdata.POCursorId(req.Cursor))
 	if err != nil {
 		qlog.Warn("Error fetching entity types: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -104,6 +106,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
 		qlog.Warn("Error fetching entity types: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -111,6 +114,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	rsp.EntityTypes = qdata.CastSlice(pageResult.Items, func(t qdata.EntityType) string { return t.AsString() })
 	rsp.NextCursor = pageResult.CursorId
 
+	rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -120,6 +124,7 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -127,6 +132,7 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	schema, err := w.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
 	if err != nil {
 		qlog.Warn("Could not get entity schema: %v", err)
+		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -134,6 +140,7 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	pbSchema := schema.AsEntitySchemaPb()
 	rsp.Schema = pbSchema
 
+	rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -169,6 +176,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -184,6 +192,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 		qdata.POCursorId(req.Cursor))
 	if err != nil {
 		qlog.Warn("Error fetching entities: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -192,6 +201,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
 		qlog.Warn("Error fetching entities: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -205,6 +215,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	rsp.NextCursor = pageResult.CursorId
 	rsp.Entities = entityIds
 
+	rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -214,6 +225,7 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -224,12 +236,14 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 		qdata.FieldType(req.FieldName))
 	if err != nil {
 		qlog.Warn("Could not check field existence: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	rsp.Exists = exists
 
+	rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -238,20 +252,23 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 	rsp := new(qprotobufs.ApiRuntimeEntityExistsResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	exists, err := w.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
 	if err != nil {
-		qlog.Error("Could not check entity existence: %v", err)
+		qlog.Warn("Could not check entity existence: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	rsp.Exists = exists
 
+	rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -260,13 +277,17 @@ func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *n
 	rsp := new(qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_DISCONNECTED
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	rsp.Connected = w.isReady
-
+	if w.isReady {
+		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_CONNECTED
+	} else {
+		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_DISCONNECTED
+	}
 	w.sendResponse(msg, rsp)
 }
 
@@ -275,14 +296,16 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	rsp := new(qprotobufs.ApiRuntimeDatabaseResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	// Only handle READ requests
 	if req.RequestType != qprotobufs.ApiRuntimeDatabaseRequest_READ {
-		qlog.Error("Only READ requests are supported")
+		qlog.Warn("Only READ requests are supported")
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -357,6 +380,7 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 
 	rsp.Response = req.Requests
 
+	rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
@@ -365,13 +389,15 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	rsp := new(qprotobufs.ApiRuntimeQueryResponse)
 
 	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
-		qlog.Error("Could not unmarshal request: %v", err)
+		qlog.Warn("Could not unmarshal request: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
 	if !w.isReady {
-		qlog.Error("Could not handle query request. Database is not connected.")
+		qlog.Warn("Could not handle query request. Database is not connected.")
+		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -402,6 +428,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	)
 	if err != nil {
 		qlog.Warn("Error preparing query: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -410,6 +437,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	pageResult, err := iter.NextPage(ctx)
 	if err != nil {
 		qlog.Warn("Error executing query: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
@@ -422,6 +450,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 
 	rsp.NextCursor = pageResult.CursorId
 
+	rsp.Status = qprotobufs.ApiRuntimeQueryResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
 
