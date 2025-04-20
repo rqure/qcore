@@ -235,6 +235,8 @@ func initializeQStoreSchema(ctx context.Context) error {
 	// Initialize the database if required
 	s.InitializeSchema(ctx)
 
+	s.RestoreSnapshot(ctx, new(qdata.Snapshot).Init())
+
 	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
 	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 		Name: qdata.ETRoot.AsString(),
