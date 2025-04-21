@@ -175,6 +175,7 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 	if err != nil {
 		qlog.Warn("Failed to ensure setup: %v", err)
 		me.setAuthReadiness(false, fmt.Sprintf("failed to ensure setup: %v", err))
+		return
 	}
 
 	qlog.Info("Setup of auth database complete")

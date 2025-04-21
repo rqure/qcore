@@ -27,6 +27,7 @@ var (
 	timeout      int
 	logLevel     string
 	libLogLevel  string
+	keycloak     bool // add flag for keycloak reinit
 )
 
 func init() {
@@ -34,6 +35,7 @@ func init() {
 	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
 	flag.StringVar(&logLevel, "log-level", "INFO", "Set application log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
+	flag.BoolVar(&keycloak, "keycloak", false, "Reinitialize keycloak database (drop/create/init)")
 	flag.Parse()
 }
 
@@ -65,16 +67,20 @@ func main() {
 
 	qlog.Info("Connected to PostgreSQL server")
 
-	// Drop both databases first
-	qlog.Info("Dropping existing databases...")
-	if err := dropKeycloakDatabase(ctx, pool); err != nil {
-		qlog.Error("Failed to drop keycloak database: %v", err)
-	}
+	if keycloak {
+		// Drop both databases first
+		qlog.Info("Dropping existing databases...")
+		if err := dropKeycloakDatabase(ctx, pool); err != nil {
+			qlog.Error("Failed to drop keycloak database: %v", err)
+		}
 
-	// Create and initialize both databases
-	qlog.Info("Creating and initializing databases...")
-	if err := createKeycloakDatabase(ctx, pool); err != nil {
-		qlog.Error("Failed to create keycloak database: %v", err)
+		// Create and initialize both databases
+		qlog.Info("Creating and initializing databases...")
+		if err := createKeycloakDatabase(ctx, pool); err != nil {
+			qlog.Error("Failed to create keycloak database: %v", err)
+		}
+	} else {
+		qlog.Info("Skipping keycloak database reinitialization (--keycloak not set)")
 	}
 
 	initializeQStoreSchema()
