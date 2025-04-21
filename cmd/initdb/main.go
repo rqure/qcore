@@ -213,7 +213,9 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 
 func initializeQStoreSchema(ctx context.Context) error {
 	// Create a store instance to interact with the database
-	s := qstore.New()
+	s := qstore.New(
+		qstore.PersistOverRedis("redis:6379", "", 0, 10),
+	)
 
 	// Connect to the database
 	s.Connect(ctx)
