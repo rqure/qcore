@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rqure/qlib/pkg/qcontext"
+	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qapp/qworkers"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -76,9 +77,7 @@ func main() {
 		qlog.Error("Failed to create keycloak database: %v", err)
 	}
 
-	if err := initializeQStoreSchema(context.WithValue(ctx, qcontext.KeyAppName, "qinitdb")); err != nil {
-		qlog.Error("Failed to initialize qstore schema: %v", err)
-	}
+	initializeQStoreSchema()
 
 	qlog.Info("Database reinitialization completed")
 }
@@ -211,127 +210,113 @@ func dropKeycloakDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func initializeQStoreSchema(ctx context.Context) error {
+func initializeQStoreSchema() {
 	// Create a store instance to interact with the database
-	s := qstore.New(
-		qstore.PersistOverRedis("redis:6379", "", 0, 10),
-	)
+	s := qstore.New()
 
-	// Connect to the database
-	s.Connect(ctx)
-	defer s.Disconnect(ctx)
+	a := qapp.NewApplication("initdb")
+	oneShotWorker := qworkers.NewOneShot(s)
+	oneShotWorker.Connected().Connect(func(ctx context.Context) {
+		// Initialize the database if required
+		s.InitializeSchema(ctx)
 
-	// Wait for connection to establish
-	startTime := time.Now()
-	timeout := 30 * time.Second
-	for !s.IsConnected() {
-		s.CheckConnection(ctx)
-		if time.Since(startTime) > timeout {
-			return fmt.Errorf("timeout waiting for database connection")
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+		s.RestoreSnapshot(ctx, new(qdata.Snapshot).Init())
 
-	qlog.Info("Connected to qstore database")
+		// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETRoot.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{Name: qdata.FTSchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
+				{Name: qdata.FTEntityCreated.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
+				{Name: qdata.FTEntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
+			},
+		}))
 
-	// Initialize the database if required
-	s.InitializeSchema(ctx)
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name:   qdata.ETFolder.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{},
+		}))
 
-	s.RestoreSnapshot(ctx, new(qdata.Snapshot).Init())
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETPermission.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString()},
+			},
+		}))
 
-	// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: qdata.ETRoot.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.FTSchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
-			{Name: qdata.FTEntityCreated.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was created
-			{Name: qdata.FTEntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
-		},
-	}))
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name:   qdata.ETAreaOfResponsibility.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{},
+		}))
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   qdata.ETFolder.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{},
-	}))
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name:   qdata.ETRole.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{},
+		}))
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: qdata.ETPermission.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString()},
-		},
-	}))
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETUser.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString()},
+				{Name: qdata.FTAreasOfResponsibilities.AsString(), Type: qdata.VTEntityList.AsString()},
+				{Name: qdata.FTSourceOfTruth.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"QOS", "Keycloak"}},
+				{Name: qdata.FTKeycloakId.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTEmail.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTFirstName.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTLastName.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTIsEmailVerified.AsString(), Type: qdata.VTBool.AsString()},
+				{Name: qdata.FTIsEnabled.AsString(), Type: qdata.VTBool.AsString()},
+				{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString()},
+			},
+		}))
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   qdata.ETAreaOfResponsibility.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{},
-	}))
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETClient.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
+				{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
+			},
+		}))
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name:   qdata.ETRole.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{},
-	}))
+		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETSessionController.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString()},
+				{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString()},
+			},
+		}))
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: qdata.ETUser.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString()},
-			{Name: qdata.FTAreasOfResponsibilities.AsString(), Type: qdata.VTEntityList.AsString()},
-			{Name: qdata.FTSourceOfTruth.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"QOS", "Keycloak"}},
-			{Name: qdata.FTKeycloakId.AsString(), Type: qdata.VTString.AsString()},
-			{Name: qdata.FTEmail.AsString(), Type: qdata.VTString.AsString()},
-			{Name: qdata.FTFirstName.AsString(), Type: qdata.VTString.AsString()},
-			{Name: qdata.FTLastName.AsString(), Type: qdata.VTString.AsString()},
-			{Name: qdata.FTIsEmailVerified.AsString(), Type: qdata.VTBool.AsString()},
-			{Name: qdata.FTIsEnabled.AsString(), Type: qdata.VTBool.AsString()},
-			{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString()},
-		},
-	}))
+		// Create root entity
+		ensureEntity(ctx, s, qdata.ETRoot, "Root")
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: qdata.ETClient.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
-			{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
-		},
-	}))
+		// Create the security models
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models")
 
-	ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
-		Name: qdata.ETSessionController.AsString(),
-		Fields: []*qprotobufs.DatabaseFieldSchema{
-			{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString()},
-			{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString()},
-		},
-	}))
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Permissions")
+		ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
 
-	// Create root entity
-	ensureEntity(ctx, s, qdata.ETRoot, "Root")
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Areas of Responsibility")
+		ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
 
-	// Create the security models
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models")
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Roles")
+		adminRole := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
 
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Permissions")
-	ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Users")
+		adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
 
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Areas of Responsibility")
-	ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
+		ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
 
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Roles")
-	adminRole := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
+		adminUser.Field("Roles").Value.FromEntityList([]qdata.EntityId{adminRole.EntityId})
+		adminUser.Field("SourceOfTruth").Value.FromChoice(0)
+		s.Write(ctx,
+			adminUser.Field("Roles").AsWriteRequest(),
+			adminUser.Field("SourceOfTruth").AsWriteRequest())
 
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Users")
-	adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
-
-	ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
-	ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
-
-	adminUser.Field("Roles").Value.FromEntityList([]qdata.EntityId{adminRole.EntityId})
-	adminUser.Field("SourceOfTruth").Value.FromChoice(0)
-	s.Write(ctx,
-		adminUser.Field("Roles").AsWriteRequest(),
-		adminUser.Field("SourceOfTruth").AsWriteRequest())
-
-	qlog.Info("Database schema initialization complete")
-	return nil
+		qlog.Info("Database schema initialization complete")
+	})
+	a.AddWorker(oneShotWorker)
+	a.Execute()
 }
 
 // Helper functions moved from init_store_worker
