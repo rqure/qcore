@@ -121,20 +121,6 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 		return
 	}
 
-	session := me.admin.Session(ctx)
-	if session.IsValid(ctx) {
-		if session.PastHalfLife(ctx) {
-			err := session.Refresh(ctx)
-			if err != nil {
-				me.setAuthReadiness(false, fmt.Sprintf("failed to refresh session: %v", err))
-				return
-			}
-		}
-	} else {
-		me.setAuthReadiness(false, "session is not valid")
-		return
-	}
-
 	select {
 	case <-me.initTimer.C:
 		me.performInit(ctx)
@@ -157,12 +143,12 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 
 	select {
 	case <-me.eventPollTimer.C:
-		qlog.Trace("Processing new session events...")
-		err := me.eventEmitter.ProcessNextBatch(ctx, session)
+		// qlog.Trace("Processing new session events...")
+		err := me.admin.ProcessEvents(ctx, me.eventEmitter)
 		if err != nil {
 			qlog.Warn("Failed to process all new session events: %v", err)
 		}
-		qlog.Trace("Processing new session events completed")
+		// qlog.Trace("Processing new session events completed")
 	default:
 		break
 	}

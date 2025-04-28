@@ -46,6 +46,8 @@ func (w *writeWorker) OnReady(ctx context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeWrite) {
+		qlog.Info("Write worker is ready and listening for requests")
+
 		w.natsCore.QueueSubscribe(
 			w.natsCore.GetKeyGenerator().GetWriteSubject(),
 			qcontext.GetAppName(ctx),
@@ -80,6 +82,8 @@ func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
 			w.handleRestoreSnapshot(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
 			w.handleDatabaseRequest(ctx, msg, &apiMsg)
+		default:
+			qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
 		}
 	})
 }

@@ -73,6 +73,8 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 			w.handleDatabaseRequest(ctx, msg, &apiMsg)
 		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
 			w.handleQuery(ctx, msg, &apiMsg)
+		default:
+			qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
 		}
 	})
 }
@@ -487,6 +489,8 @@ func (w *readWorker) OnReady(ctx context.Context) {
 	w.isReady = true
 
 	if w.modeManager.HasModes(ModeRead) {
+		qlog.Info("Read worker is ready and listening for requests")
+
 		w.natsCore.QueueSubscribe(
 			w.natsCore.GetKeyGenerator().GetReadSubject(),
 			qcontext.GetAppName(ctx),
