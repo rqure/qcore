@@ -13,16 +13,14 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
-	"github.com/rqure/qlib/pkg/qcontext"
+	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qapp/qworkers"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qlog"
 )
 
 const (
-	defaultPostgresAddr = "postgres://qcore:qcore@postgres:5432/qstore?sslmode=disable"
-	defaultTimeout      = 30 * time.Second
-
 	// Output format constants
 	formatTable        = "table"
 	formatPlain        = "plain"
@@ -55,13 +53,6 @@ func init() {
 	flag.StringVar(&cacheAddr, "cache-addr", "", "Cache server address")
 	flag.DurationVar(&cacheTTL, "cache-ttl", 5*time.Minute, "Cache TTL duration")
 	flag.Parse()
-}
-
-func getEnvOrDefault(env, defaultVal string) string {
-	if val := os.Getenv(env); val != "" {
-		return val
-	}
-	return defaultVal
 }
 
 // Result represents a row of data from the query result
@@ -308,25 +299,6 @@ func main() {
 	// Set log levels before any other operations
 	setLogLevel(logLevel, libLogLevel)
 
-	ctx := context.WithValue(context.Background(), qcontext.KeyAppName, "qsql")
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	store := qstore.New()
-	store.Connect(ctx)
-	defer store.Disconnect(ctx)
-
-	// Wait for connection
-	startTime := time.Now()
-	for !store.IsConnected() {
-		store.CheckConnection(ctx)
-		if time.Since(startTime) > defaultTimeout {
-			qlog.Error("Timeout waiting for database connection")
-			os.Exit(1)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
 	// Get query from command line args or stdin
 	query := strings.Join(flag.Args(), " ")
 	if query == "" {
@@ -347,30 +319,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Execute query and collect results
-	results := ResultSet{
-		Headers: []string{},
-		Rows:    []Result{},
-	}
+	store := qstore.New()
 
-	// First pass to collect all possible headers
-	start := time.Now()
-	iter, err := store.PrepareQuery(query)
-	if err != nil {
-		qlog.Error("Failed to prepare query: %s", err.Error())
-		os.Exit(1)
-	}
-	defer iter.Close()
+	app := qapp.NewApplication("sql")
+	oneShotWorker := qworkers.NewOneShot(store)
 
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		results.Headers = row.Selected()
-		results.Rows = append(results.Rows, Result{data: row})
-		return true
+	oneShotWorker.Connected().Connect(func(ctx context.Context) {
+		// Execute query and collect results
+		results := ResultSet{
+			Headers: []string{},
+			Rows:    []Result{},
+		}
+
+		// First pass to collect all possible headers
+		start := time.Now()
+		iter, err := store.PrepareQuery(query)
+		if err != nil {
+			qlog.Error("Failed to prepare query: %s", err.Error())
+			return
+		}
+		defer iter.Close()
+
+		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+			results.Headers = row.Selected()
+			results.Rows = append(results.Rows, Result{data: row})
+			return true
+		})
+		qlog.Trace("Query executed in %s", time.Since(start))
+
+		// Display results in selected format
+		displayResults(results)
 	})
-	qlog.Trace("Query executed in %s", time.Since(start))
 
-	// Display results in selected format
-	displayResults(results)
+	app.AddWorker(oneShotWorker)
+	app.Execute()
 }
 
 func setLogLevel(appLevel, libLevel string) {
