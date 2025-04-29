@@ -35,23 +35,15 @@ const (
 )
 
 var (
-	timeout      int
 	logLevel     string
 	libLogLevel  string
 	outputFormat string
-	cacheType    string
-	cacheAddr    string
-	cacheTTL     time.Duration
 )
 
 func init() {
-	flag.IntVar(&timeout, "timeout", 30, "Connection timeout in seconds")
-	flag.StringVar(&logLevel, "log-level", "INFO", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
-	flag.StringVar(&libLogLevel, "lib-log-level", "INFO", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
+	flag.StringVar(&logLevel, "log-level", "WARN", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
+	flag.StringVar(&libLogLevel, "lib-log-level", "WARN", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&outputFormat, "format", "table", "Output format (table, plain, unicode, unicodelight, unicodebold, colon, csv, github, json, xml)")
-	flag.StringVar(&cacheType, "cache", "", "Cache type for postgres (none, redis, memcached)")
-	flag.StringVar(&cacheAddr, "cache-addr", "", "Cache server address")
-	flag.DurationVar(&cacheTTL, "cache-ttl", 5*time.Minute, "Cache TTL duration")
 	flag.Parse()
 }
 
