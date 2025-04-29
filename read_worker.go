@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -47,7 +48,14 @@ func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) handleReadRequest(msg *nats.Msg) {
+	startTime := time.Now()
+	endCh := make(chan any, 1)
+
 	w.handle.DoInMainThread(func(ctx context.Context) {
+		defer func() {
+			endCh <- nil
+		}()
+
 		var apiMsg qprotobufs.ApiMessage
 		if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
 			qlog.Warn("Could not unmarshal message: %v", err)
@@ -77,6 +85,9 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 			qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
 		}
 	})
+
+	<-endCh
+	qlog.Debug("Read request handled in %v", time.Since(startTime))
 }
 
 func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
