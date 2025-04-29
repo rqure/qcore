@@ -229,7 +229,7 @@ func initializeQStoreSchema() {
 		s.RestoreSnapshot(ctx, new(qdata.Snapshot).Init())
 
 		// Create entity schemas (copied from InitStoreWorker.OnStoreConnected)
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err := ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETRoot.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
 				{Name: qdata.FTSchemaChanged.AsString(), Type: qdata.VTString.AsString()},          // written value is the entity type that had its schema changed
@@ -237,30 +237,50 @@ func initializeQStoreSchema() {
 				{Name: qdata.FTEntityDeleted.AsString(), Type: qdata.VTEntityReference.AsString()}, // written value is the entity id that was deleted
 			},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name:   qdata.ETFolder.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETPermission.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
 				{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString()},
 			},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name:   qdata.ETAreaOfResponsibility.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name:   qdata.ETRole.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETUser.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
 				{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString()},
@@ -275,49 +295,118 @@ func initializeQStoreSchema() {
 				{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString()},
 			},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETClient.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
 				{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
 				{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
 			},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
-		ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETSessionController.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
 				{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString()},
 				{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString()},
 			},
 		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
+			return
+		}
 
 		// Create root entity
-		ensureEntity(ctx, s, qdata.ETRoot, "Root")
+		_, err = ensureEntity(ctx, s, qdata.ETRoot, "Root")
+		if err != nil {
+			qlog.Warn("Failed to create root entity: %v", err)
+			return
+		}
 
 		// Create the security models
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models")
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models")
+		if err != nil {
+			qlog.Warn("Failed to create security models folder: %v", err)
+			return
+		}
 
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Permissions")
-		ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Permissions")
+		if err != nil {
+			qlog.Warn("Failed to create permissions folder: %v", err)
+			return
+		}
 
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Areas of Responsibility")
-		ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+		_, err = ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
+		if err != nil {
+			qlog.Warn("Failed to create system permission: %v", err)
+			return
+		}
 
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Roles")
-		adminRole := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Areas of Responsibility")
+		if err != nil {
+			qlog.Warn("Failed to create areas of responsibility folder: %v", err)
+			return
+		}
 
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Users")
-		adminUser := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
+		_, err = ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+		if err != nil {
+			qlog.Warn("Failed to create system area of responsibility: %v", err)
+			return
+		}
 
-		ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
-		ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Roles")
+		if err != nil {
+			qlog.Warn("Failed to create roles folder: %v", err)
+			return
+		}
+
+		adminRole, err := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
+		if err != nil {
+			qlog.Warn("Failed to create admin role: %v", err)
+			return
+		}
+
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Users")
+		if err != nil {
+			qlog.Warn("Failed to create users folder: %v", err)
+			return
+		}
+
+		adminUser, err := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
+		if err != nil {
+			qlog.Warn("Failed to create admin user: %v", err)
+			return
+		}
+
+		_, err = ensureEntity(ctx, s, qdata.ETFolder, "Root", "Security Models", "Clients")
+		if err != nil {
+			qlog.Warn("Failed to create clients folder: %v", err)
+			return
+		}
+
+		_, err = ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
+		if err != nil {
+			qlog.Warn("Failed to create qcore client: %v", err)
+			return
+		}
 
 		adminUser.Field("Roles").Value.FromEntityList([]qdata.EntityId{adminRole.EntityId})
 		adminUser.Field("SourceOfTruth").Value.FromChoice(0)
-		s.Write(ctx,
+		err = s.Write(ctx,
 			adminUser.Field("Roles").AsWriteRequest(),
 			adminUser.Field("SourceOfTruth").AsWriteRequest())
+		if err != nil {
+			qlog.Warn("Failed to write admin user roles: %v", err)
+			return
+		}
 
 		qlog.Info("Database schema initialization complete")
 	})
@@ -326,7 +415,7 @@ func initializeQStoreSchema() {
 }
 
 // Helper functions moved from init_store_worker
-func ensureEntitySchema(ctx context.Context, s *qdata.Store, schema *qdata.EntitySchema) {
+func ensureEntitySchema(ctx context.Context, s *qdata.Store, schema *qdata.EntitySchema) error {
 	actualSchema, err := s.GetEntitySchema(ctx, schema.EntityType)
 	if err == nil {
 		for _, field := range schema.Fields {
@@ -336,36 +425,37 @@ func ensureEntitySchema(ctx context.Context, s *qdata.Store, schema *qdata.Entit
 		actualSchema = schema
 	}
 
-	s.SetEntitySchema(ctx, actualSchema)
+	err = s.SetEntitySchema(ctx, actualSchema)
+	if err != nil {
+		return fmt.Errorf("failed to set entity schema for %s: %w", schema.EntityType, err)
+	}
+
 	qlog.Info("Ensured entity schema: %s", schema.EntityType)
+	return nil
 }
 
-func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.EntityType, path ...string) *qdata.Entity {
+func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.EntityType, path ...string) (*qdata.Entity, error) {
 	// The first element should be the root entity
 	if len(path) == 0 {
-		return nil
+		return nil, fmt.Errorf("path cannot be empty")
 	}
 
 	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root WHERE Name = %q`, path[0])
 	if err != nil {
-		qlog.Error("Failed to prepare query: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to prepare query: %w", err)
 	}
 	defer iter.Close()
 
 	var currentNode *qdata.Entity
 	if !iter.Next(ctx) {
 		if entityType == qdata.ETRoot {
-			qlog.Info("Creating %s entity '%s'", qdata.ETRoot, path[0])
 			root, err := store.CreateEntity(ctx, qdata.ETRoot, "", path[0])
 			if err != nil {
-				qlog.Warn("Failed to create root entity: %v", err)
-				return nil
+				return nil, fmt.Errorf("failed to create root entity: %w", err)
 			}
-			return new(qdata.Entity).Init(root.EntityId)
+			return new(qdata.Entity).Init(root.EntityId), nil
 		} else {
-			qlog.Error("Root entity not found")
-			return nil
+			return nil, fmt.Errorf("root entity not found")
 		}
 	} else {
 		currentNode = iter.Get().AsEntity()
@@ -395,23 +485,19 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		}
 
 		if !found && i == lastIndex {
-			qlog.Info("Creating entity '%s' (%d) in path '%s'", name, i+1, strings.Join(path, "/"))
 			et, err := store.CreateEntity(ctx, entityType, currentNode.EntityId, name)
 			if err != nil {
-				qlog.Error("Failed to create entity '%s': %v", name, err)
-				return nil
+				return nil, fmt.Errorf("failed to create entity '%s': %w", name, err)
 			}
-			return new(qdata.Entity).Init(et.EntityId)
+			return new(qdata.Entity).Init(et.EntityId), nil
 		} else if !found {
-			qlog.Error("Entity '%s' (%d) not found in path '%s'", name, i+1, strings.Join(path, "/"))
-			return nil
+			return nil, fmt.Errorf("entity '%s' not found in path '%s'", name, strings.Join(path, "/"))
 		}
 	}
 
 	if currentNode == nil {
-		qlog.Error("Current node is nil: %s", strings.Join(path, "/"))
-		return nil
+		return nil, fmt.Errorf("current node is nil for path '%s'", strings.Join(path, "/"))
 	}
 
-	return new(qdata.Entity).Init(currentNode.EntityId)
+	return new(qdata.Entity).Init(currentNode.EntityId), nil
 }
