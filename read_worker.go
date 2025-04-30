@@ -431,8 +431,14 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 			),
 		)
 	}
+
+	if req.Engine == "" {
+		req.Query = string(qdata.QEExprLang)
+	}
+
 	opts = append(opts, qdata.POPageSize(pageSize))
 	opts = append(opts, qdata.POCursorId(req.Cursor))
+	opts = append(opts, qdata.QueryEngineType(req.Engine))
 
 	// Prepare and execute the query with pagination
 	iter, err := w.store.PrepareQuery(

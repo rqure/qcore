@@ -84,8 +84,6 @@ func main() {
 	}
 
 	initializeQStoreSchema()
-
-	qlog.Info("Database reinitialization completed")
 }
 
 func setLogLevel(appLevel, libLevel string) {
@@ -440,7 +438,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil, fmt.Errorf("path cannot be empty")
 	}
 
-	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root WHERE Name = %q`, path[0])
+	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root`, path[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare query: %w", err)
 	}
