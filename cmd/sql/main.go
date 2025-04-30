@@ -40,12 +40,14 @@ var (
 	logLevel     string
 	libLogLevel  string
 	outputFormat string
+	queryEngine  string
 )
 
 func init() {
 	flag.StringVar(&logLevel, "log-level", "WARN", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "WARN", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&outputFormat, "format", "table", "Output format (table, plain, unicode, unicodelight, unicodebold, colon, csv, github, json, xml)")
+	flag.StringVar(&queryEngine, "engine", "exprlang", "Query engine to use (expr, sqlite, etc.)")
 	flag.Parse()
 }
 
@@ -332,7 +334,7 @@ func main() {
 		}
 
 		// First pass to collect all possible headers
-		iter, err := store.PrepareQuery(query)
+		iter, err := store.PrepareQuery(query, qdata.QueryEngineType(queryEngine))
 		if err != nil {
 			qlog.Error("Failed to prepare query: %s", err.Error())
 			return

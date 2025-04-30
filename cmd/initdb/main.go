@@ -463,17 +463,24 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 	// Return early if the intermediate entities are not found
 	lastIndex := len(path) - 2
 	for i, name := range path[1:] {
-		store.Read(ctx, currentNode.Field("Children").AsReadRequest())
+		err := store.Read(ctx, currentNode.Field("Children").AsReadRequest())
+		if err != nil {
+			return nil, fmt.Errorf("failed to read children of entity '%s': %w", currentNode.EntityId, err)
+		}
+
 		children := currentNode.Field("Children").Value.GetEntityList()
 
 		found := false
 		for _, childId := range children {
 			child := new(qdata.Entity).Init(childId)
 
-			store.Read(ctx,
+			err = store.Read(ctx,
 				child.Field("Name").AsReadRequest(),
 				child.Field("Children").AsReadRequest(),
 			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read child entity '%s': %w", child.EntityId, err)
+			}
 
 			if child.Field("Name").Value.GetString() == name {
 				currentNode = child
