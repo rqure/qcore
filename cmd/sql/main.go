@@ -15,6 +15,8 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
+	"github.com/rqure/qlib/pkg/qauthentication"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -317,6 +319,12 @@ func main() {
 	oneShotWorker := qworkers.NewOneShot(store)
 
 	oneShotWorker.Connected().Connect(func(ctx context.Context) {
+		clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
+		client := clientProvider.Client(ctx)
+		if client != nil {
+			_ = client.GetSession(ctx)
+		}
+
 		// Execute query and collect results
 		results := ResultSet{
 			Headers: []string{},
@@ -324,7 +332,6 @@ func main() {
 		}
 
 		// First pass to collect all possible headers
-		start := time.Now()
 		iter, err := store.PrepareQuery(query)
 		if err != nil {
 			qlog.Error("Failed to prepare query: %s", err.Error())
@@ -332,6 +339,7 @@ func main() {
 		}
 		defer iter.Close()
 
+		start := time.Now()
 		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
 			results.Headers = row.Selected()
 			results.Rows = append(results.Rows, Result{data: row})

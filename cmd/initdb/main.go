@@ -438,7 +438,7 @@ func ensureEntity(ctx context.Context, store *qdata.Store, entityType qdata.Enti
 		return nil, fmt.Errorf("path cannot be empty")
 	}
 
-	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root`, path[0])
+	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM Root`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare query: %w", err)
 	}
