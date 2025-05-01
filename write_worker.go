@@ -6,8 +6,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
-	"github.com/rqure/qlib/pkg/qauthentication"
-	"github.com/rqure/qlib/pkg/qauthorization"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
@@ -117,6 +115,14 @@ func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	entity, err := w.store.CreateEntity(
 		ctx,
 		qdata.EntityType(req.Type),
@@ -152,6 +158,14 @@ func (w *writeWorker) handleDeleteEntity(ctx context.Context, msg *nats.Msg, api
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	if err := w.store.DeleteEntity(ctx, qdata.EntityId(req.Id)); err != nil {
 		qlog.Warn("Could not delete entity: %v", err)
 		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
@@ -181,6 +195,14 @@ func (w *writeWorker) handleSetEntitySchema(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	if err := w.store.SetEntitySchema(ctx, new(qdata.EntitySchema).FromEntitySchemaPb(req.Schema)); err != nil {
 		qlog.Warn("Could not set entity schema: %v", err)
 		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
@@ -209,6 +231,14 @@ func (w *writeWorker) handleRestoreSnapshot(ctx context.Context, msg *nats.Msg, 
 		w.sendResponse(msg, rsp)
 		return
 	}
+
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
 
 	if err := w.store.RestoreSnapshot(ctx, new(qdata.Snapshot).FromSnapshotPb(req.Snapshot)); err != nil {
 		qlog.Warn("Could not restore snapshot: %v", err)
@@ -254,94 +284,16 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 	}
 
 	qlog.Info("Write request: %v", req.Requests)
-	clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
-	client := clientProvider.Client(ctx)
-	if client == nil {
-		qlog.Warn("Client not found")
+
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
 
-	accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
-
-	if !accessorSession.IsValid(ctx) {
-		qlog.Warn("Invalid session")
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-
-	accessorName, err := accessorSession.GetOwnerName(ctx)
-	if err != nil {
-		qlog.Warn("Could not get owner name: %v", err)
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-
-	found := false
-	iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
-	if err != nil {
-		qlog.Warn("Could not prepare query: %v", err)
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
-	defer iter.Close()
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		user := row.AsEntity()
-		w.store.Write(
-			context.WithValue(
-				ctx,
-				qcontext.KeyAuthorizer,
-				qauthorization.NewAuthorizer(user.EntityId, w.store)),
-			reqs...)
-
-		found = true
-
-		// Break after first user
-		return false
-	})
-
-	if !found {
-		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
-		if err != nil {
-			qlog.Warn("Could not prepare query: %v", err)
-			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-			w.sendResponse(msg, rsp)
-			return
-		}
-		defer iter.Close()
-
-		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-			client := row.AsEntity()
-			w.store.Write(
-				context.WithValue(
-					ctx,
-					qcontext.KeyAuthorizer,
-					qauthorization.NewAuthorizer(client.EntityId, w.store)),
-				reqs...)
-
-			found = true
-
-			// Break after first client
-			return false
-		})
-	}
-
-	if !found && accessorName == "qinitdb" {
-		qlog.Info("InitDB client detected, skipping authorization")
-		w.store.Write(ctx, reqs...)
-		found = true
-	}
-
-	if !found {
-		qlog.Warn("Could not find user or client with name %q", accessorName)
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
+	// Perform write operation with the authorized context
+	w.store.Write(authCtx, reqs...)
 
 	for i, req := range reqs {
 		rsp.Response[i] = req.AsRequestPb()

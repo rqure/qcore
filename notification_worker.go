@@ -85,7 +85,11 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 		cfg := qnotify.FromConfigPb(cfg)
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
 
-		me.handle.DoInMainThread(func(context.Context) {
+		me.handle.DoInMainThread(func(ctx context.Context) {
+			_, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, me.store)
+			if !ok {
+				return
+			}
 			me.notifManager.Register(cfg)
 		})
 	}
@@ -105,7 +109,11 @@ func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg
 		return
 	}
 
-	me.handle.DoInMainThread(func(context.Context) {
+	me.handle.DoInMainThread(func(ctx context.Context) {
+		_, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, me.store)
+		if !ok {
+			return
+		}
 		for _, token := range req.Tokens {
 			me.notifManager.Unregister(qnotify.FromToken(token))
 		}
