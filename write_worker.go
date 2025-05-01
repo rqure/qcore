@@ -246,6 +246,8 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		return
 	}
 
+	rsp.Response = req.Requests
+
 	reqs := []*qdata.Request{}
 	for _, r := range req.Requests {
 		reqs = append(reqs, new(qdata.Request).FromRequestPb(r))
@@ -254,26 +256,56 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 	qlog.Info("Write request: %v", req.Requests)
 	clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
 	client := clientProvider.Client(ctx)
-	if client != nil {
-		accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
+	if client == nil {
+		qlog.Warn("Client not found")
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
 
-		if !accessorSession.IsValid(ctx) {
-			qlog.Warn("Invalid session")
-			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-			w.sendResponse(msg, rsp)
-			return
-		}
+	accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
 
-		accessorName, err := accessorSession.GetOwnerName(ctx)
-		if err != nil {
-			qlog.Warn("Could not get owner name: %v", err)
-			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-			w.sendResponse(msg, rsp)
-			return
-		}
+	if !accessorSession.IsValid(ctx) {
+		qlog.Warn("Invalid session")
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
 
-		found := false
-		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
+	accessorName, err := accessorSession.GetOwnerName(ctx)
+	if err != nil {
+		qlog.Warn("Could not get owner name: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	found := false
+	iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
+	if err != nil {
+		qlog.Warn("Could not prepare query: %v", err)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	defer iter.Close()
+	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+		user := row.AsEntity()
+		w.store.Write(
+			context.WithValue(
+				ctx,
+				qcontext.KeyAuthorizer,
+				qauthorization.NewAuthorizer(user.EntityId, w.store)),
+			reqs...)
+
+		found = true
+
+		// Break after first user
+		return false
+	})
+
+	if !found {
+		iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
 		if err != nil {
 			qlog.Warn("Could not prepare query: %v", err)
 			rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
@@ -281,47 +313,40 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 			return
 		}
 		defer iter.Close()
+
 		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-			user := row.AsEntity()
+			client := row.AsEntity()
 			w.store.Write(
 				context.WithValue(
 					ctx,
 					qcontext.KeyAuthorizer,
-					qauthorization.NewAuthorizer(user.EntityId, w.store)),
+					qauthorization.NewAuthorizer(client.EntityId, w.store)),
 				reqs...)
 
 			found = true
 
-			// Break after first user
+			// Break after first client
 			return false
 		})
-
-		if !found {
-			iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
-			if err != nil {
-				qlog.Warn("Could not prepare query: %v", err)
-				rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-				w.sendResponse(msg, rsp)
-				return
-			}
-			defer iter.Close()
-
-			iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-				client := row.AsEntity()
-				w.store.Write(
-					context.WithValue(
-						ctx,
-						qcontext.KeyAuthorizer,
-						qauthorization.NewAuthorizer(client.EntityId, w.store)),
-					reqs...)
-
-				// Break after first client
-				return false
-			})
-		}
 	}
 
-	rsp.Response = req.Requests
+	if accessorName == "initdb" {
+		qlog.Info("InitDB client detected, skipping authorization")
+		w.store.Write(ctx, reqs...)
+		found = true
+	}
+
+	if !found {
+		qlog.Warn("Could not find user or client with name %q", accessorName)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+
+	for i, req := range reqs {
+		rsp.Response[i] = req.AsRequestPb()
+	}
+
 	rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_SUCCESS
 	w.sendResponse(msg, rsp)
 }
