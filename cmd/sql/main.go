@@ -317,7 +317,7 @@ func main() {
 
 	store := qstore.New()
 
-	app := qapp.NewApplication("sql")
+	app := qapp.NewApplication("qsql")
 	oneShotWorker := qworkers.NewOneShot(store)
 
 	oneShotWorker.Connected().Connect(func(ctx context.Context) {

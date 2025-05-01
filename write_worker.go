@@ -330,7 +330,7 @@ func (w *writeWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, 
 		})
 	}
 
-	if accessorName == "initdb" {
+	if !found && accessorName == "qinitdb" {
 		qlog.Info("InitDB client detected, skipping authorization")
 		w.store.Write(ctx, reqs...)
 		found = true

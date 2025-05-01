@@ -218,7 +218,7 @@ func initializeQStoreSchema() {
 	// Create a store instance to interact with the database
 	s := qstore.New()
 
-	a := qapp.NewApplication("initdb")
+	a := qapp.NewApplication("qinitdb")
 	oneShotWorker := qworkers.NewOneShot(s)
 	oneShotWorker.Connected().Connect(func(ctx context.Context) {
 		// Initialize the database if required
@@ -281,16 +281,16 @@ func initializeQStoreSchema() {
 		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETUser.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
-				{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString()},
-				{Name: qdata.FTAreasOfResponsibilities.AsString(), Type: qdata.VTEntityList.AsString()},
-				{Name: qdata.FTSourceOfTruth.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"QOS", "Keycloak"}},
-				{Name: qdata.FTKeycloakId.AsString(), Type: qdata.VTString.AsString()},
-				{Name: qdata.FTEmail.AsString(), Type: qdata.VTString.AsString()},
-				{Name: qdata.FTFirstName.AsString(), Type: qdata.VTString.AsString()},
-				{Name: qdata.FTLastName.AsString(), Type: qdata.VTString.AsString()},
-				{Name: qdata.FTIsEmailVerified.AsString(), Type: qdata.VTBool.AsString()},
-				{Name: qdata.FTIsEnabled.AsString(), Type: qdata.VTBool.AsString()},
-				{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTRoles.AsString(), Type: qdata.VTEntityList.AsString(), Rank: 5},
+				{Name: qdata.FTAreasOfResponsibilities.AsString(), Type: qdata.VTEntityList.AsString(), Rank: 6},
+				{Name: qdata.FTSourceOfTruth.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"QOS", "Keycloak"}, Rank: 7},
+				{Name: qdata.FTKeycloakId.AsString(), Type: qdata.VTString.AsString(), Rank: 8},
+				{Name: qdata.FTEmail.AsString(), Type: qdata.VTString.AsString(), Rank: 9},
+				{Name: qdata.FTFirstName.AsString(), Type: qdata.VTString.AsString(), Rank: 10},
+				{Name: qdata.FTLastName.AsString(), Type: qdata.VTString.AsString(), Rank: 11},
+				{Name: qdata.FTIsEmailVerified.AsString(), Type: qdata.VTBool.AsString(), Rank: 12},
+				{Name: qdata.FTIsEnabled.AsString(), Type: qdata.VTBool.AsString(), Rank: 13},
+				{Name: qdata.FTJSON.AsString(), Type: qdata.VTString.AsString(), Rank: 14},
 			},
 		}))
 		if err != nil {
@@ -301,8 +301,8 @@ func initializeQStoreSchema() {
 		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETClient.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
-				{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
-				{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}},
+				{Name: qdata.FTLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}, Rank: 5},
+				{Name: qdata.FTQLibLogLevel.AsString(), Type: qdata.VTChoice.AsString(), ChoiceOptions: []string{"Trace", "Debug", "Info", "Warn", "Error", "Panic"}, Rank: 6},
 			},
 		}))
 		if err != nil {
@@ -313,8 +313,8 @@ func initializeQStoreSchema() {
 		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETSessionController.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
-				{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString()},
-				{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString()},
+				{Name: qdata.FTLastEventTime.AsString(), Type: qdata.VTTimestamp.AsString(), Rank: 5},
+				{Name: qdata.FTLogout.AsString(), Type: qdata.VTEntityReference.AsString(), Rank: 6},
 			},
 		}))
 		if err != nil {
@@ -342,7 +342,7 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		_, err = ensureEntity(ctx, s, "Permission", "Root", "Security Models", "Permissions", "System")
+		_, err = ensureEntity(ctx, s, qdata.ETPermission, "Root", "Security Models", "Permissions", "System")
 		if err != nil {
 			qlog.Warn("Failed to create system permission: %v", err)
 			return
@@ -354,7 +354,7 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		_, err = ensureEntity(ctx, s, "AreaOfResponsibility", "Root", "Security Models", "Areas of Responsibility", "System")
+		_, err = ensureEntity(ctx, s, qdata.ETAreaOfResponsibility, "Root", "Security Models", "Areas of Responsibility", "System")
 		if err != nil {
 			qlog.Warn("Failed to create system area of responsibility: %v", err)
 			return
@@ -366,7 +366,7 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		adminRole, err := ensureEntity(ctx, s, "Role", "Root", "Security Models", "Roles", "Admin")
+		adminRole, err := ensureEntity(ctx, s, qdata.ETRole, "Root", "Security Models", "Roles", "Admin")
 		if err != nil {
 			qlog.Warn("Failed to create admin role: %v", err)
 			return
@@ -378,7 +378,7 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		adminUser, err := ensureEntity(ctx, s, "User", "Root", "Security Models", "Users", "qei")
+		adminUser, err := ensureEntity(ctx, s, qdata.ETUser, "Root", "Security Models", "Users", "qei")
 		if err != nil {
 			qlog.Warn("Failed to create admin user: %v", err)
 			return
@@ -390,7 +390,19 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		_, err = ensureEntity(ctx, s, "Client", "Root", "Security Models", "Clients", "qcore")
+		_, err = ensureEntity(ctx, s, qdata.ETClient, "Root", "Security Models", "Clients", "qinitdb")
+		if err != nil {
+			qlog.Warn("Failed to create initdb client: %v", err)
+			return
+		}
+
+		_, err = ensureEntity(ctx, s, qdata.ETClient, "Root", "Security Models", "Clients", "qsql")
+		if err != nil {
+			qlog.Warn("Failed to create initdb client: %v", err)
+			return
+		}
+
+		_, err = ensureEntity(ctx, s, qdata.ETClient, "Root", "Security Models", "Clients", "qcore")
 		if err != nil {
 			qlog.Warn("Failed to create qcore client: %v", err)
 			return

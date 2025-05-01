@@ -63,13 +63,11 @@ func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
 		return
 	}
 
-	me.handle.DoInMainThread(func(context.Context) {
-		if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}) {
-			me.handleRegisterNotification(msg, &apiMsg)
-		} else if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}) {
-			me.handleUnregisterNotification(msg, &apiMsg)
-		}
-	})
+	if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}) {
+		me.handleRegisterNotification(msg, &apiMsg)
+	} else if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}) {
+		me.handleUnregisterNotification(msg, &apiMsg)
+	}
 }
 
 func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
@@ -85,8 +83,11 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 
 	for _, cfg := range req.Requests {
 		cfg := qnotify.FromConfigPb(cfg)
-		me.notifManager.Register(cfg)
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
+
+		me.handle.DoInMainThread(func(context.Context) {
+			me.notifManager.Register(cfg)
+		})
 	}
 
 	rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_SUCCESS
@@ -104,9 +105,11 @@ func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg
 		return
 	}
 
-	for _, token := range req.Tokens {
-		me.notifManager.Unregister(qnotify.FromToken(token))
-	}
+	me.handle.DoInMainThread(func(context.Context) {
+		for _, token := range req.Tokens {
+			me.notifManager.Unregister(qnotify.FromToken(token))
+		}
+	})
 
 	rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_SUCCESS
 	me.sendResponse(msg, rsp)
