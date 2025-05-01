@@ -6,8 +6,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
-	"github.com/rqure/qlib/pkg/qauthentication"
-	"github.com/rqure/qlib/pkg/qauthorization"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
@@ -101,6 +99,14 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	// Apply default page size if not specified
 	pageSize := req.PageSize
 	if pageSize <= 0 {
@@ -142,6 +148,14 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	schema, err := w.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
 	if err != nil {
 		qlog.Warn("Could not get entity schema: %v", err)
@@ -166,6 +180,13 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 		w.sendResponse(msg, rsp)
 		return
 	}
+
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
 
 	iter, err := w.store.FindEntities("Root")
 	if err != nil {
@@ -193,6 +214,14 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 		w.sendResponse(msg, rsp)
 		return
 	}
+
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
 
 	// Apply default page size if not specified
 	pageSize := req.PageSize
@@ -243,6 +272,14 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	exists, err := w.store.FieldExists(
 		ctx,
 		qdata.EntityType(req.EntityType),
@@ -271,6 +308,14 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 		return
 	}
 
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
+
 	exists, err := w.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
 	if err != nil {
 		qlog.Warn("Could not check entity existence: %v", err)
@@ -296,6 +341,7 @@ func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *n
 		return
 	}
 
+	// Connection status can be checked without authentication
 	if w.isReady {
 		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_CONNECTED
 	} else {
@@ -331,86 +377,15 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	}
 
 	qlog.Info("Read request: %v", req.Requests)
-	clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
-	client := clientProvider.Client(ctx)
-	if client == nil {
-		qlog.Warn("Client not found")
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		w.sendResponse(msg, rsp)
 		return
 	}
-	accessorSession := client.AccessTokenToSession(ctx, apiMsg.Header.AccessToken)
+	ctx = authCtx
 
-	if !accessorSession.IsValid(ctx) {
-		qlog.Warn("Invalid session")
-		return
-	}
-
-	accessorName, err := accessorSession.GetOwnerName(ctx)
-	if err != nil {
-		qlog.Warn("Could not get owner name: %v", err)
-		return
-	}
-
-	found := false
-	iter, err := w.store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
-	if err != nil {
-		qlog.Warn("Could not prepare query: %v", err)
-		return
-	}
-	defer iter.Close()
-
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		user := row.AsEntity()
-		w.store.Read(
-			context.WithValue(
-				ctx,
-				qcontext.KeyAuthorizer,
-				qauthorization.NewAuthorizer(user.EntityId, w.store)),
-			reqs...)
-
-		found = true
-
-		// Break after first user
-		return false
-	})
-
-	if !found {
-		iter, err = w.store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
-		if err != nil {
-			qlog.Warn("Could not prepare query: %v", err)
-			return
-		}
-		defer iter.Close()
-
-		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-			client := row.AsEntity()
-			w.store.Read(
-				context.WithValue(
-					ctx,
-					qcontext.KeyAuthorizer,
-					qauthorization.NewAuthorizer(client.EntityId, w.store)),
-				reqs...)
-
-			found = true
-
-			// Break after first client
-			return false
-		})
-	}
-
-	if !found && accessorName == "qinitdb" {
-		qlog.Info("InitDB client detected, skipping authorization")
-		w.store.Read(ctx, reqs...)
-		found = true
-	}
-
-	if !found {
-		qlog.Warn("No matching user or client found for accessor name: %q", accessorName)
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
-		return
-	}
+	w.store.Read(ctx, reqs...)
 
 	for i, req := range reqs {
 		rsp.Response[i] = req.AsRequestPb()
@@ -430,6 +405,14 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 		w.sendResponse(msg, rsp)
 		return
 	}
+
+	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	if !ok {
+		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
+		w.sendResponse(msg, rsp)
+		return
+	}
+	ctx = authCtx
 
 	if !w.isReady {
 		qlog.Warn("Could not handle query request. Database is not connected.")
