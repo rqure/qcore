@@ -252,7 +252,7 @@ func initializeQStoreSchema() {
 		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
 			Name: qdata.ETPermission.AsString(),
 			Fields: []*qprotobufs.DatabaseFieldSchema{
-				{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString()},
+				{Name: qdata.FTPolicy.AsString(), Type: qdata.VTString.AsString(), Rank: 5},
 			},
 		}))
 		if err != nil {
@@ -342,9 +342,40 @@ func initializeQStoreSchema() {
 			return
 		}
 
-		_, err = ensureEntity(ctx, s, qdata.ETPermission, "Root", "Security Models", "Permissions", "System")
+		kernelPermission, err := ensureEntity(ctx, s, qdata.ETPermission, "Root", "Security Models", "Permissions", "Kernel")
 		if err != nil {
 			qlog.Warn("Failed to create system permission: %v", err)
+			return
+		}
+		// Policies are written in the tengo scripting language
+		kernelPermission.Field("Policy").Value.FromString(`
+			contains := func(l, v) {
+				for i in l {
+					if i == v {
+						return true
+					}
+				}
+				return false
+			}
+
+			ALLOW := false
+			if contains(["Client"], SUBJECT.entityType()) {
+				STORE.read(
+					SUBJECT.field("Name").asReadRequest())
+				
+				name := SUBJECT.field("Name").value.getString()
+				ALLOW = contains(["qinitdb", "qsql", "qcore"], name)
+			} else if contains(["User"], SUBJECT.entityType()) {
+			 	SUBJECT.read(
+					SUBJECT.field("Name").asReadRequest())
+				
+				name := SUBJECT.field("Name").value.getString()
+				ALLOW = contains(["qei"], name)
+			}
+		`)
+		err = s.Write(ctx, kernelPermission.Field("Policy").AsWriteRequest())
+		if err != nil {
+			qlog.Warn("Failed to write kernel permission policy: %v", err)
 			return
 		}
 
@@ -415,6 +446,24 @@ func initializeQStoreSchema() {
 			adminUser.Field("SourceOfTruth").AsWriteRequest())
 		if err != nil {
 			qlog.Warn("Failed to write admin user roles: %v", err)
+			return
+		}
+
+		err = ensureEntitySchema(ctx, s, new(qdata.EntitySchema).FromEntitySchemaPb(&qprotobufs.DatabaseEntitySchema{
+			Name: qdata.ETPermission.AsString(),
+			Fields: []*qprotobufs.DatabaseFieldSchema{
+				{
+					Name: qdata.FTPolicy.AsString(),
+					Type: qdata.VTString.AsString(),
+					Rank: 5,
+					WritePermissions: []string{
+						kernelPermission.EntityId.AsString(),
+					},
+				},
+			},
+		}))
+		if err != nil {
+			qlog.Warn("Failed to ensure entity schema: %v", err)
 			return
 		}
 
