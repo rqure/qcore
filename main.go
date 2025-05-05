@@ -13,7 +13,10 @@ func main() {
 
 	store := qstore.New2(natsCore)
 
+	initWorker := NewInitWorker(store)
 	storeWorker := qworkers.NewStore(store)
+	storeWorker.Connected().Connect(initWorker.OnConnected)
+
 	modeManager := NewModeManager()
 
 	readWorker := NewReadWorker(store, natsCore, modeManager)
@@ -23,10 +26,10 @@ func main() {
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(NewSessionReadyCriteria(sessionWorker))
+	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, store))
 
 	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)
 
-	// Connect store signals
 	readinessWorker.BecameReady().Connect(readWorker.OnReady)
 	readinessWorker.BecameReady().Connect(writeWorker.OnReady)
 	readinessWorker.BecameReady().Connect(sessionWorker.OnReady)
