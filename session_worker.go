@@ -134,21 +134,20 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 
 	select {
 	case <-me.fullSyncTimer.C:
-		qlog.Trace("Performing full sync...")
 		me.performFullSync(ctx)
-		qlog.Trace("Full sync completed")
+		qlog.Trace("Performed full sync")
 	default:
 		break
 	}
 
 	select {
 	case <-me.eventPollTimer.C:
-		// qlog.Trace("Processing new session events...")
 		err := me.admin.ProcessEvents(ctx, me.eventEmitter)
 		if err != nil {
 			qlog.Warn("Failed to process all new session events: %v", err)
+		} else {
+			qlog.Trace("Processed new session events")
 		}
-		// qlog.Trace("Processing new session events completed")
 	default:
 		break
 	}
@@ -179,7 +178,7 @@ func (me *sessionWorker) OnReady(ctx context.Context) {
 
 	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
 		sessionController := row.AsEntity()
-		lastEventTime := sessionController.Field("LastEventTime").Value.GetTimestamp()
+		lastEventTime := sessionController.Field(qdata.FTLastEventTime).Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
 		return true
 	})
@@ -190,85 +189,133 @@ func (me *sessionWorker) OnNotReady(context.Context) {
 }
 
 func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
+	toString := func(e qauthentication.Event) string {
+		return fmt.Sprintf("[%s] type=%s realm=%s client=%s user=%s session=%s ip=%s error=%q details=%v",
+			e.Time().Format(time.RFC3339),
+			e.Type(),
+			e.RealmID(),
+			e.ClientID(),
+			e.UserID(),
+			e.SessionID(),
+			e.IPAddress(),
+			e.Error(),
+			e.Details())
+	}
+
+	qlog.Trace("Received Keycloak event: %s", toString(e.Event))
+
 	iter, err := me.store.PrepareQuery(`SELECT "$EntityId", LastEventTime FROM SessionController`)
 	if err != nil {
 		qlog.Warn("Failed to prepare query: %v", err)
 		return
 	}
 
+	reqs := []*qdata.Request{}
 	iter.ForEach(e.Ctx, func(row qdata.QueryRow) bool {
 		sessionController := row.AsEntity()
-		sessionController.Field("LastEventTime").Value.SetTimestamp(time.Now())
-		me.store.Write(e.Ctx, sessionController.Field("LastEventTime").AsWriteRequest())
+		sessionController.Field(qdata.FTLastEventTime).Value.SetTimestamp(time.Now())
+		reqs = append(reqs, sessionController.Field(qdata.FTLastEventTime).AsWriteRequest())
 		return true
 	})
+
+	err = me.store.Write(e.Ctx, reqs...)
+	if err != nil {
+		qlog.Warn("Failed to write last event time: %v", err)
+		return
+	}
 }
 
 func (me *sessionWorker) performFullSync(ctx context.Context) error {
+	usersFolder, err := qdata.NewPathResolver(me.store).Resolve(ctx, "Root", "Security Models", "Users")
+	if err != nil {
+		return fmt.Errorf("failed to resolve users folder: %w", err)
+	}
+
+	keycloakUsersByName, err := me.admin.GetUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get Keycloak users: %w", err)
+	}
+
+	SourceOfTruth_QOS := 0
+	SourceOfTruth_Keycloak := 1
+	iter, err := me.store.PrepareQuery(`SELECT Name, SourceOfTruth, Parent FROM User WHERE Parent = %q`, usersFolder.EntityId)
+	if err != nil {
+		return fmt.Errorf("failed to prepare query: %w", err)
+	}
+
 	// 1. Sync store users to Keycloak
-	// usersFolderId := qdata.PathResolver
+	storeUsersByName := make(map[string]*qdata.Entity)
+	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
+		user := row.AsEntity()
+		name := user.Field(qdata.FTName).Value.GetString()
+		sourceOfTruth := user.Field("SourceOfTruth").Value.GetChoice()
 
-	// keycloakUsersByName, err := me.admin.GetUsers(ctx)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get Keycloak users: %w", err)
-	// }
+		storeUsersByName[name] = user
 
-	// iterator := me.store.PrepareQuery(`SELECT Name, SourceOfTruth, Parent FROM User WHERE SourceOfTruth = 'Keycloak'")
-	// for _, user := range storeUsers {
-	// 	storeUsersByName[user.GetField("Name").GetString()] = user
+		if sourceOfTruth != SourceOfTruth_QOS {
+			return true // continue to next user
+		}
 
-	// 	if usersFolderId == "" {
-	// 		usersFolderId = user.GetField("Parent").GetEntityReference()
-	// 	}
+		// Create user in Keycloak if it doesn't exist
+		if _, ok := keycloakUsersByName[name]; !ok {
+			qlog.Info("Creating QOS user '%s' in Keycloak", name)
+			if err := me.admin.CreateUser(ctx, name, name); err != nil {
+				qlog.Error("Failed to sync user %s to Keycloak: %v", name, err)
+			}
+		}
 
-	// 	// Only sync users where store is source of truth
-	// 	if user.GetField("SourceOfTruth").GetCompleteChoice(ctx).Option() != "QOS" {
-	// 		continue
-	// 	}
-
-	// 	// Create or update user in Keycloak
-	// 	username := user.GetField("Name").GetString()
-	// 	if _, ok := keycloakUsersByName[username]; !ok {
-	// 		qlog.Info("Creating QOS user '%s' in Keycloak", username)
-	// 		if err := me.admin.CreateUser(ctx, username, username); err != nil {
-	// 			qlog.Error("Failed to sync user %s to Keycloak: %v", username, err)
-	// 		}
-	// 	}
-	// }
-
-	// if usersFolderId == "" {
-	// 	return fmt.Errorf("users folder not found")
-	// }
+		return true // continue to next user
+	})
 
 	// 2. Sync Keycloak users to store
-	// for _, kcUser := range keycloakUsersByName {
-	// 	if user, ok := storeUsersByName[kcUser.GetUsername()]; !ok {
-	// 		qlog.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
-	// 		userId := me.store.CreateEntity(ctx, "User", usersFolderId, kcUser.GetUsername())
-	// 		user = qbinding.NewEntity(ctx, me.store, userId)
-	// 		user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
-	// 			userBinding.GetField("SourceOfTruth").WriteChoice(ctx, "Keycloak")
-	// 			userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
-	// 			userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
-	// 			userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
-	// 			userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
-	// 			userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
-	// 			userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
-	// 			userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
-	// 		})
-	// 	} else {
-	// 		qlog.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
-	// 		user.DoMulti(ctx, func(userBinding qdata.EntityBinding) {
-	// 			userBinding.GetField("KeycloakId").WriteString(ctx, kcUser.GetID())
-	// 			userBinding.GetField("Email").WriteString(ctx, kcUser.GetEmail())
-	// 			userBinding.GetField("FirstName").WriteString(ctx, kcUser.GetFirstName())
-	// 			userBinding.GetField("LastName").WriteString(ctx, kcUser.GetLastName())
-	// 			userBinding.GetField("IsEmailVerified").WriteBool(ctx, kcUser.IsEmailVerified())
-	// 			userBinding.GetField("IsEnabled").WriteBool(ctx, kcUser.IsEnabled())
-	// 			userBinding.GetField("JSON").WriteString(ctx, kcUser.JSON())
-	// 		})
-	// 	}
-	// }
+	reqs := []*qdata.Request{}
+	for _, kcUser := range keycloakUsersByName {
+		user, ok := storeUsersByName[kcUser.GetUsername()]
+		if !ok {
+			qlog.Info("Creating QOS user '%s' from Keycloak", kcUser.GetUsername())
+			user, err = me.store.CreateEntity(ctx, qdata.ETUser, usersFolder.EntityId, kcUser.GetUsername())
+			if err != nil {
+				qlog.Error("Failed to create Keycloak user %q in QOS: %v", kcUser.GetUsername(), err)
+				continue
+			}
+
+			user.Field(qdata.FTSourceOfTruth).Value.FromChoice(SourceOfTruth_Keycloak)
+			user.Field(qdata.FTKeycloakId).Value.FromString(kcUser.GetID())
+			user.Field(qdata.FTEmail).Value.FromString(kcUser.GetEmail())
+			user.Field(qdata.FTFirstName).Value.FromString(kcUser.GetFirstName())
+			user.Field(qdata.FTLastName).Value.FromString(kcUser.GetLastName())
+			user.Field(qdata.FTIsEmailVerified).Value.FromBool(kcUser.IsEmailVerified())
+			user.Field(qdata.FTIsEnabled).Value.FromBool(kcUser.IsEnabled())
+			user.Field(qdata.FTJSON).Value.FromString(kcUser.JSON())
+
+			reqs = append(reqs,
+				user.Field(qdata.FTSourceOfTruth).AsWriteRequest())
+		} else {
+			qlog.Info("Updating QOS user '%s' from Keycloak", kcUser.GetUsername())
+			user.Field(qdata.FTKeycloakId).Value.FromString(kcUser.GetID())
+			user.Field(qdata.FTEmail).Value.FromString(kcUser.GetEmail())
+			user.Field(qdata.FTFirstName).Value.FromString(kcUser.GetFirstName())
+			user.Field(qdata.FTLastName).Value.FromString(kcUser.GetLastName())
+			user.Field(qdata.FTIsEmailVerified).Value.FromBool(kcUser.IsEmailVerified())
+			user.Field(qdata.FTIsEnabled).Value.FromBool(kcUser.IsEnabled())
+			user.Field(qdata.FTJSON).Value.FromString(kcUser.JSON())
+		}
+
+		reqs = append(reqs,
+			user.Field(qdata.FTKeycloakId).AsWriteRequest(),
+			user.Field(qdata.FTEmail).AsWriteRequest(),
+			user.Field(qdata.FTFirstName).AsWriteRequest(),
+			user.Field(qdata.FTLastName).AsWriteRequest(),
+			user.Field(qdata.FTIsEmailVerified).AsWriteRequest(),
+			user.Field(qdata.FTIsEnabled).AsWriteRequest(),
+			user.Field(qdata.FTJSON).AsWriteRequest())
+	}
+
+	if len(reqs) > 0 {
+		if err := me.store.Write(ctx, reqs...); err != nil {
+			return fmt.Errorf("failed to write users to store: %w", err)
+		}
+	}
 
 	return nil
 }
