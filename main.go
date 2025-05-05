@@ -26,7 +26,6 @@ func main() {
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(NewSessionReadyCriteria(sessionWorker))
-	readinessWorker.AddCriteria(qworkers.NewSchemaValidityCriteria(storeWorker, store))
 
 	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)
 
