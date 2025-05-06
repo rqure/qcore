@@ -64,11 +64,16 @@ func (w *writeWorker) Init(ctx context.Context) {
 
 func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
 	startTime := time.Now()
-	endCh := make(chan any, 1)
+	responseCh := make(chan proto.Message, 1)
 
 	w.handle.DoInMainThread(func(ctx context.Context) {
 		defer func() {
-			endCh <- nil
+			// If no response was sent, send nil
+			select {
+			case responseCh <- nil:
+			default:
+				// A response was already sent
+			}
 		}()
 
 		var apiMsg qprotobufs.ApiMessage
@@ -93,8 +98,11 @@ func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
 		}
 	})
 
-	<-endCh
+	response := <-responseCh
 	qlog.Debug("Write request handled in %v", time.Since(startTime))
+	if response != nil {
+		w.sendResponse(msg, response)
+	}
 }
 
 func (w *writeWorker) handleCreateEntity(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {

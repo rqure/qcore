@@ -47,11 +47,16 @@ func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 	startTime := time.Now()
-	endCh := make(chan any, 1)
+	responseCh := make(chan proto.Message, 1)
 
 	w.handle.DoInMainThread(func(ctx context.Context) {
 		defer func() {
-			endCh <- nil
+			// If no response was sent, send nil
+			select {
+			case responseCh <- nil:
+			default:
+				// A response was already sent
+			}
 		}()
 
 		var apiMsg qprotobufs.ApiMessage
@@ -84,8 +89,12 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 		}
 	})
 
-	<-endCh
+	response := <-responseCh
 	qlog.Debug("Read request handled in %v", time.Since(startTime))
+
+	if response != nil {
+		w.sendResponse(msg, response)
+	}
 }
 
 func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
