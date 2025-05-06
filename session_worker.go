@@ -134,8 +134,12 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 
 	select {
 	case <-me.fullSyncTimer.C:
-		me.performFullSync(ctx)
-		qlog.Trace("Performed full sync")
+		err := me.performFullSync(ctx)
+		if err != nil {
+			qlog.Warn("Failed to perform full sync: %v", err)
+		} else {
+			qlog.Trace("Performed full sync")
+		}
 	default:
 		break
 	}
@@ -165,6 +169,13 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 
 	qlog.Info("Setup of auth database complete")
 	me.setAuthReadiness(true, "")
+
+	err = me.performFullSync(ctx)
+	if err != nil {
+		qlog.Warn("Failed to perform initial sync: %v", err)
+	} else {
+		qlog.Trace("Performed initial sync of users")
+	}
 }
 
 func (me *sessionWorker) OnReady(ctx context.Context) {
