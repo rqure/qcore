@@ -46,10 +46,13 @@ func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) handleReadRequest(msg *nats.Msg) {
-	startTime := time.Now()
 	responseCh := make(chan proto.Message, 1)
 
 	w.handle.DoInMainThread(func(ctx context.Context) {
+		startTime := time.Now()
+		defer func() {
+			qlog.Trace("Took %s to process", time.Since(startTime))
+		}()
 		defer func() {
 			// If no response was sent, send nil
 			select {
@@ -90,7 +93,6 @@ func (w *readWorker) handleReadRequest(msg *nats.Msg) {
 	})
 
 	response := <-responseCh
-	qlog.Debug("Read request handled in %v", time.Since(startTime))
 
 	if response != nil {
 		w.sendResponse(msg, response)

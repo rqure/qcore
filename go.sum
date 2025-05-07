@@ -90,8 +90,8 @@ github.com/redis/go-redis/v9 v9.1.0 h1:137FnGdk+EQdCbye1FW+qOEcY5S+SpY9T0Niuqvtf
 github.com/redis/go-redis/v9 v9.1.0/go.mod h1:urWj3He21Dj5k4TK1y59xH8Uj6ATueP8AH1cY3lZl4c=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
-github.com/rqure/qlib v0.1.121 h1:lMITbdxjiRkaxxRdhub/szARJwf9VE7/ky3ELkrW9zc=
-github.com/rqure/qlib v0.1.121/go.mod h1:d41ukuGlZzlD1yf9/5bug+NioqXYk7rjjzzyP/QcLdY=
+github.com/rqure/qlib v0.1.122 h1:twxia3AicvagkL4j1gPcEGbvu4kpjQLp2nLWyUXY0ag=
+github.com/rqure/qlib v0.1.122/go.mod h1:d41ukuGlZzlD1yf9/5bug+NioqXYk7rjjzzyP/QcLdY=
 github.com/segmentio/ksuid v1.0.4 h1:sBo2BdShXjmcugAMwjugoGUdUV0pcxY5mW4xKRn3v4c=
 github.com/segmentio/ksuid v1.0.4/go.mod h1:/XUiZBD3kVx5SmUOl55voK5yeAbBNNIed+2O73XgrPE=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
