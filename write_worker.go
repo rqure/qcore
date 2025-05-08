@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -19,6 +18,7 @@ type WriteWorker interface {
 	qapp.Worker
 	OnReady(context.Context)
 	OnNotReady(context.Context)
+	OnMessageReceived(args MessageReceivedArgs)
 }
 
 type writeWorker struct {
@@ -48,48 +48,26 @@ func (w *writeWorker) Init(ctx context.Context) {
 	w.handle = qcontext.GetHandle(ctx)
 }
 
-func (w *writeWorker) handleWriteRequest(msg *nats.Msg) {
-	responseCh := make(chan proto.Message, 1)
+func (w *writeWorker) OnMessageReceived(args MessageReceivedArgs) {
+	var apiMsg qprotobufs.ApiMessage
+	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
+		qlog.Warn("Could not unmarshal message: %v", err)
+		return
+	}
 
-	w.handle.DoInMainThread(func(ctx context.Context) {
-		startTime := time.Now()
-		defer func() {
-			qlog.Trace("Took %s to process", time.Since(startTime))
-		}()
-		defer func() {
-			// If no response was sent, send nil
-			select {
-			case responseCh <- nil:
-			default:
-				// A response was already sent
-			}
-		}()
-
-		var apiMsg qprotobufs.ApiMessage
-		if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-			qlog.Warn("Could not unmarshal message: %v", err)
-			return
-		}
-
-		switch {
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigCreateEntityRequest{}):
-			w.handleCreateEntity(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigDeleteEntityRequest{}):
-			w.handleDeleteEntity(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigSetEntitySchemaRequest{}):
-			w.handleSetEntitySchema(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigRestoreSnapshotRequest{}):
-			w.handleRestoreSnapshot(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
-			w.handleDatabaseRequest(ctx, msg, &apiMsg)
-		default:
-			qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
-		}
-	})
-
-	response := <-responseCh
-	if response != nil {
-		w.sendResponse(msg, response)
+	switch {
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigCreateEntityRequest{}):
+		w.handleCreateEntity(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigDeleteEntityRequest{}):
+		w.handleDeleteEntity(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigSetEntitySchemaRequest{}):
+		w.handleSetEntitySchema(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigRestoreSnapshotRequest{}):
+		w.handleRestoreSnapshot(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
+		w.handleDatabaseRequest(ctx, msg, &apiMsg)
+	default:
+		qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
 	}
 }
 

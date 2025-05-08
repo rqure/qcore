@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -43,11 +42,6 @@ func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) OnMessageReceived(args MessageReceivedArgs) {
-	startTime := time.Now()
-	defer func() {
-		qlog.Trace("Took %s to process", time.Since(startTime))
-	}()
-
 	switch {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
 		w.handleGetEntityTypes(args)
