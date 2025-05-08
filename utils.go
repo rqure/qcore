@@ -21,7 +21,7 @@ func verifyAuthentication(ctx context.Context, accessToken string, store qdata.S
 	}
 
 	accessorSession := client.AccessTokenToSession(ctx, accessToken)
-	if !accessorSession.IsValid(ctx) {
+	if !accessorSession.CheckIsValid(ctx) {
 		qlog.Warn("Invalid session")
 		return nil, false
 	}

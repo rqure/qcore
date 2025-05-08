@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/nats-io/nats.go"
+	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
@@ -19,6 +19,8 @@ type ReadWorker interface {
 	qapp.Worker
 	OnReady(context.Context)
 	OnNotReady(context.Context)
+
+	OnMessageReceived(args MessageReceivedArgs)
 }
 
 type readWorker struct {
@@ -40,59 +42,52 @@ func (w *readWorker) Init(ctx context.Context) {
 func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
-func (w *readWorker) handleReadRequest(msg *nats.Msg) {
+func (w *readWorker) OnMessageReceived(args MessageReceivedArgs) {
 	startTime := time.Now()
 	defer func() {
 		qlog.Trace("Took %s to process", time.Since(startTime))
 	}()
 
-	var apiMsg qprotobufs.ApiMessage
-	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-		qlog.Warn("Could not unmarshal message: %v", err)
-		return
-	}
-
 	switch {
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
-		w.handleGetEntityTypes(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
-		w.handleGetEntitySchema(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
-		w.handleGetRoot(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
-		w.handleGetEntities(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
-		w.handleFieldExists(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeEntityExistsRequest{}):
-		w.handleEntityExists(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest{}):
-		w.handleGetDatabaseConnectionStatus(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
-		w.handleDatabaseRequest(ctx, msg, &apiMsg)
-	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
-		w.handleQuery(ctx, msg, &apiMsg)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
+		w.handleGetEntityTypes(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
+		w.handleGetEntitySchema(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
+		w.handleGetRoot(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
+		w.handleGetEntities(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
+		w.handleFieldExists(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeEntityExistsRequest{}):
+		w.handleEntityExists(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest{}):
+		w.handleGetDatabaseConnectionStatus(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
+		w.handleDatabaseRequest(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
+		w.handleQuery(args)
 	default:
-		qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
+		qlog.Warn("Unknown message type: %v", args.Msg.Payload.TypeUrl)
 	}
-
-	w.sendResponse(msg, response)
 }
 
-func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleGetEntityTypes(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeGetEntityTypesRequest)
 	rsp := new(qprotobufs.ApiRuntimeGetEntityTypesResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -107,7 +102,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	if err != nil {
 		qlog.Warn("Error fetching entity types: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -116,7 +111,7 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	if err != nil {
 		qlog.Warn("Error fetching entity types: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -124,24 +119,25 @@ func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, ap
 	rsp.NextCursor = pageResult.CursorId
 
 	rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleGetEntitySchema(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiConfigGetEntitySchemaRequest)
 	rsp := new(qprotobufs.ApiConfigGetEntitySchemaResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -150,7 +146,7 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	if err != nil {
 		qlog.Warn("Could not get entity schema: %v", err)
 		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -158,22 +154,23 @@ func (w *readWorker) handleGetEntitySchema(ctx context.Context, msg *nats.Msg, a
 	rsp.Schema = pbSchema
 
 	rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleGetRoot(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiConfigGetRootRequest)
 	rsp := new(qprotobufs.ApiConfigGetRootResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -181,7 +178,7 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 	iter, err := w.store.FindEntities("Root")
 	if err != nil {
 		qlog.Warn("Could not find root entity: %v", err)
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	defer iter.Close()
@@ -191,24 +188,25 @@ func (w *readWorker) handleGetRoot(ctx context.Context, msg *nats.Msg, apiMsg *q
 		return false // Break after first root
 	})
 
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleGetEntities(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeFindEntitiesRequest)
 	rsp := new(qprotobufs.ApiRuntimeFindEntitiesResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -225,7 +223,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	if err != nil {
 		qlog.Warn("Error fetching entities: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	defer iter.Close()
@@ -234,7 +232,7 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	if err != nil {
 		qlog.Warn("Error fetching entities: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -248,24 +246,25 @@ func (w *readWorker) handleGetEntities(ctx context.Context, msg *nats.Msg, apiMs
 	rsp.Entities = entityIds
 
 	rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleFieldExists(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeFieldExistsRequest)
 	rsp := new(qprotobufs.ApiRuntimeFieldExistsResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -277,31 +276,32 @@ func (w *readWorker) handleFieldExists(ctx context.Context, msg *nats.Msg, apiMs
 	if err != nil {
 		qlog.Warn("Could not check field existence: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
 	rsp.Exists = exists
 
 	rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleEntityExists(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeEntityExistsRequest)
 	rsp := new(qprotobufs.ApiRuntimeEntityExistsResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -310,24 +310,24 @@ func (w *readWorker) handleEntityExists(ctx context.Context, msg *nats.Msg, apiM
 	if err != nil {
 		qlog.Warn("Could not check entity existence: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
 	rsp.Exists = exists
 
 	rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleGetDatabaseConnectionStatus(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest)
 	rsp := new(qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_DISCONNECTED
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -337,17 +337,17 @@ func (w *readWorker) handleGetDatabaseConnectionStatus(_ context.Context, msg *n
 	} else {
 		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_DISCONNECTED
 	}
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeDatabaseRequest)
 	rsp := new(qprotobufs.ApiRuntimeDatabaseResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -355,7 +355,7 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	if req.RequestType != qprotobufs.ApiRuntimeDatabaseRequest_READ {
 		qlog.Warn("Only READ requests are supported")
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -367,10 +367,12 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	}
 
 	qlog.Info("Read request: %v", req.Requests)
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -382,24 +384,25 @@ func (w *readWorker) handleDatabaseRequest(ctx context.Context, msg *nats.Msg, a
 	}
 
 	rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (w *readWorker) handleQuery(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeQueryRequest)
 	rsp := new(qprotobufs.ApiRuntimeQueryResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, w.store)
+	ctx := args.Ctx
+	authCtx, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, w.store)
 	if !ok {
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	ctx = authCtx
@@ -407,7 +410,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	if !w.isReady {
 		qlog.Warn("Could not handle query request. Database is not connected.")
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -444,7 +447,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	if err != nil {
 		qlog.Warn("Error preparing query: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 	defer iter.Close()
@@ -453,7 +456,7 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	if err != nil {
 		qlog.Warn("Error executing query: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
-		w.sendResponse(msg, rsp)
+		w.sendResponse(args, rsp)
 		return
 	}
 
@@ -466,34 +469,26 @@ func (w *readWorker) handleQuery(ctx context.Context, msg *nats.Msg, apiMsg *qpr
 	rsp.NextCursor = pageResult.CursorId
 
 	rsp.Status = qprotobufs.ApiRuntimeQueryResponse_SUCCESS
-	w.sendResponse(msg, rsp)
+	w.sendResponse(args, rsp)
 }
 
-func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
-	if msg.Reply == "" {
-		return
-	}
-
-	apiMsg := &qprotobufs.ApiMessage{
-		Header: &qprotobufs.ApiHeader{
-			Timestamp: timestamppb.Now(),
-		},
-	}
+func (w *readWorker) sendResponse(args MessageReceivedArgs, response proto.Message) {
+	args.Msg.Header.Timestamp = timestamppb.Now()
 
 	var err error
-	apiMsg.Payload, err = anypb.New(response)
+	args.Msg.Payload, err = anypb.New(response)
 	if err != nil {
 		qlog.Warn("Could not marshal response: %v", err)
 		return
 	}
 
-	data, err := proto.Marshal(apiMsg)
+	data, err := proto.Marshal(args.Msg)
 	if err != nil {
 		qlog.Warn("Could not marshal message: %v", err)
 		return
 	}
 
-	if err := msg.Respond(data); err != nil {
+	if err := args.Conn.Write(args.Ctx, websocket.MessageBinary, data); err != nil {
 		qlog.Warn("Could not send response: %v", err)
 	}
 }
