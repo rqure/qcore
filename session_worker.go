@@ -60,8 +60,6 @@ type SessionWorker interface {
 type sessionWorker struct {
 	handle qcontext.Handle
 
-	modeManager ModeManager
-
 	authReady        qss.Signal[qss.VoidType]
 	authNotReady     qss.Signal[qss.VoidType]
 	isAdminAuthReady bool
@@ -78,9 +76,8 @@ type sessionWorker struct {
 	eventPollTimer *time.Ticker
 }
 
-func NewSessionWorker(store *qdata.Store, modeManager ModeManager) SessionWorker {
+func NewSessionWorker(store *qdata.Store) SessionWorker {
 	return &sessionWorker{
-		modeManager:  modeManager,
 		store:        store,
 		authReady:    qss.New[qss.VoidType](),
 		authNotReady: qss.New[qss.VoidType](),
@@ -89,10 +86,6 @@ func NewSessionWorker(store *qdata.Store, modeManager ModeManager) SessionWorker
 
 func (me *sessionWorker) Init(ctx context.Context) {
 	me.handle = qcontext.GetHandle(ctx)
-
-	if !me.modeManager.HasModes(ModeWrite) {
-		return
-	}
 
 	me.core = qauthentication.NewCore()
 	me.admin = qauthentication.NewAdmin(me.core)
@@ -107,10 +100,6 @@ func (me *sessionWorker) Init(ctx context.Context) {
 }
 
 func (me *sessionWorker) Deinit(context.Context) {
-	if !me.modeManager.HasModes(ModeWrite) {
-		return
-	}
-
 	me.initTimer.Stop()
 	me.fullSyncTimer.Stop()
 	me.eventPollTimer.Stop()
@@ -121,10 +110,6 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 	defer func() {
 		qlog.Trace("Took %s to process", time.Since(startTime))
 	}()
-
-	if !me.modeManager.HasModes(ModeWrite) {
-		return
-	}
 
 	select {
 	case <-me.initTimer.C:

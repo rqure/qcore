@@ -8,7 +8,6 @@ import (
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
@@ -23,19 +22,15 @@ type WriteWorker interface {
 }
 
 type writeWorker struct {
-	store       *qdata.Store
-	natsCore    qnats.NatsCore
-	isReady     bool
-	modeManager ModeManager
+	store   *qdata.Store
+	isReady bool
 
 	handle qcontext.Handle
 }
 
-func NewWriteWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager) WriteWorker {
+func NewWriteWorker(store *qdata.Store) WriteWorker {
 	return &writeWorker{
-		store:       store,
-		natsCore:    natsCore,
-		modeManager: modeManager,
+		store: store,
 	}
 }
 
@@ -43,15 +38,6 @@ func (w *writeWorker) Deinit(context.Context) {}
 func (w *writeWorker) DoWork(context.Context) {}
 func (w *writeWorker) OnReady(ctx context.Context) {
 	w.isReady = true
-
-	if w.modeManager.HasModes(ModeWrite) {
-		qlog.Info("Write worker is ready and listening for requests")
-
-		w.natsCore.QueueSubscribe(
-			w.natsCore.GetKeyGenerator().GetWriteSubject(),
-			qcontext.GetAppName(ctx),
-			w.handleWriteRequest)
-	}
 }
 
 func (w *writeWorker) OnNotReady(context.Context) {

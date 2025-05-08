@@ -9,7 +9,6 @@ import (
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qnotify"
-	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
@@ -19,22 +18,17 @@ import (
 
 type NotificationWorker interface {
 	qapp.Worker
-	OnBeforeStoreConnected(qdata.ConnectedArgs)
 }
 
 type notificationWorker struct {
 	store        *qdata.Store
-	natsCore     qnats.NatsCore
-	modeManager  ModeManager
 	notifManager NotificationManager
 	handle       qcontext.Handle
 }
 
-func NewNotificationWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager, notifManager NotificationManager) NotificationWorker {
+func NewNotificationWorker(store *qdata.Store, notifManager NotificationManager) NotificationWorker {
 	return &notificationWorker{
 		store:        store,
-		natsCore:     natsCore,
-		modeManager:  modeManager,
 		notifManager: notifManager,
 	}
 }
@@ -51,15 +45,6 @@ func (me *notificationWorker) DoWork(context.Context) {
 	}()
 
 	me.notifManager.ClearExpired()
-}
-
-func (me *notificationWorker) OnBeforeStoreConnected(args qdata.ConnectedArgs) {
-	if me.modeManager.HasModes(ModeWrite) {
-		me.natsCore.QueueSubscribe(
-			qnats.NewKeyGenerator().GetNotificationRegistrationSubject(),
-			qcontext.GetAppName(args.Ctx),
-			me.handleNotificationRequest)
-	}
 }
 
 func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {

@@ -8,7 +8,6 @@ import (
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
-	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"google.golang.org/protobuf/proto"
@@ -23,18 +22,14 @@ type ReadWorker interface {
 }
 
 type readWorker struct {
-	store       *qdata.Store
-	natsCore    qnats.NatsCore
-	isReady     bool
-	modeManager ModeManager
-	handle      qcontext.Handle
+	store   *qdata.Store
+	isReady bool
+	handle  qcontext.Handle
 }
 
-func NewReadWorker(store *qdata.Store, natsCore qnats.NatsCore, modeManager ModeManager) ReadWorker {
+func NewReadWorker(store *qdata.Store) ReadWorker {
 	return &readWorker{
-		store:       store,
-		natsCore:    natsCore,
-		modeManager: modeManager,
+		store: store,
 	}
 }
 
@@ -46,57 +41,41 @@ func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) handleReadRequest(msg *nats.Msg) {
-	responseCh := make(chan proto.Message, 1)
+	startTime := time.Now()
+	defer func() {
+		qlog.Trace("Took %s to process", time.Since(startTime))
+	}()
 
-	w.handle.DoInMainThread(func(ctx context.Context) {
-		startTime := time.Now()
-		defer func() {
-			qlog.Trace("Took %s to process", time.Since(startTime))
-		}()
-		defer func() {
-			// If no response was sent, send nil
-			select {
-			case responseCh <- nil:
-			default:
-				// A response was already sent
-			}
-		}()
-
-		var apiMsg qprotobufs.ApiMessage
-		if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-			qlog.Warn("Could not unmarshal message: %v", err)
-			return
-		}
-
-		switch {
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
-			w.handleGetEntityTypes(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
-			w.handleGetEntitySchema(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
-			w.handleGetRoot(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
-			w.handleGetEntities(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
-			w.handleFieldExists(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeEntityExistsRequest{}):
-			w.handleEntityExists(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest{}):
-			w.handleGetDatabaseConnectionStatus(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
-			w.handleDatabaseRequest(ctx, msg, &apiMsg)
-		case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
-			w.handleQuery(ctx, msg, &apiMsg)
-		default:
-			qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
-		}
-	})
-
-	response := <-responseCh
-
-	if response != nil {
-		w.sendResponse(msg, response)
+	var apiMsg qprotobufs.ApiMessage
+	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
+		qlog.Warn("Could not unmarshal message: %v", err)
+		return
 	}
+
+	switch {
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
+		w.handleGetEntityTypes(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
+		w.handleGetEntitySchema(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
+		w.handleGetRoot(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
+		w.handleGetEntities(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
+		w.handleFieldExists(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeEntityExistsRequest{}):
+		w.handleEntityExists(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest{}):
+		w.handleGetDatabaseConnectionStatus(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
+		w.handleDatabaseRequest(ctx, msg, &apiMsg)
+	case apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
+		w.handleQuery(ctx, msg, &apiMsg)
+	default:
+		qlog.Warn("Unknown message type: %v", apiMsg.Payload.TypeUrl)
+	}
+
+	w.sendResponse(msg, response)
 }
 
 func (w *readWorker) handleGetEntityTypes(ctx context.Context, msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
@@ -521,15 +500,6 @@ func (w *readWorker) sendResponse(msg *nats.Msg, response proto.Message) {
 
 func (w *readWorker) OnReady(ctx context.Context) {
 	w.isReady = true
-
-	if w.modeManager.HasModes(ModeRead) {
-		qlog.Info("Read worker is ready and listening for requests")
-
-		w.natsCore.QueueSubscribe(
-			w.natsCore.GetKeyGenerator().GetReadSubject(),
-			qcontext.GetAppName(ctx),
-			w.handleReadRequest)
-	}
 }
 
 func (w *readWorker) OnNotReady(context.Context) {

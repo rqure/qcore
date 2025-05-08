@@ -3,10 +3,11 @@ module github.com/rqure/qcore
 go 1.24
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/nats-io/nats.go v1.39.1
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/rqure/qlib v0.1.122
+	github.com/rqure/qlib v0.1.123
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -18,7 +19,6 @@ require (
 	github.com/d5/tengo/v2 v2.17.0 // indirect
 	github.com/dgraph-io/badger/v4 v4.7.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/expr-lang/expr v1.17.2 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
@@ -37,9 +37,7 @@ require (
 	github.com/nats-io/nkeys v0.4.10 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/redis/go-redis/v9 v9.1.0 // indirect
 	github.com/segmentio/ksuid v1.0.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect

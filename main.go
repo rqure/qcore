@@ -4,30 +4,24 @@ import (
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qapp/qworkers"
 	"github.com/rqure/qlib/pkg/qdata/qstore"
-	"github.com/rqure/qlib/pkg/qdata/qstore/qnats"
 )
 
 func main() {
-	natsCore := qnats.NewCore(qnats.NatsConfig{Address: qstore.DefaultNatsAddress()})
-	notificationManager := NewNotificationManager(natsCore)
-
-	store := qstore.New2(natsCore)
+	notificationManager := NewNotificationManager()
+	store := qstore.New2()
 
 	initWorker := NewInitWorker(store)
 	storeWorker := qworkers.NewStore(store)
 	storeWorker.Connected().Connect(initWorker.OnConnected)
 
-	modeManager := NewModeManager()
+	readWorker := NewReadWorker(store)
+	writeWorker := NewWriteWorker(store)
+	notificationWorker := NewNotificationWorker(store, notificationManager)
+	sessionWorker := NewSessionWorker(store)
 
-	readWorker := NewReadWorker(store, natsCore, modeManager)
-	writeWorker := NewWriteWorker(store, natsCore, modeManager)
-	notificationWorker := NewNotificationWorker(store, natsCore, modeManager, notificationManager)
-	sessionWorker := NewSessionWorker(store, modeManager)
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(NewSessionReadyCriteria(sessionWorker))
-
-	natsCore.BeforeConnected().Connect(notificationWorker.OnBeforeStoreConnected)
 
 	readinessWorker.BecameReady().Connect(readWorker.OnReady)
 	readinessWorker.BecameReady().Connect(writeWorker.OnReady)
