@@ -26,8 +26,8 @@ func main() {
 	connectionWorker.ClientConnected().Connect(notificationWorker.OnClientConnected)
 	connectionWorker.ClientDisconnected().Connect(notificationWorker.OnClientDisconnected)
 
-	storeWorker.Connected().Connect(connectionWorker.OnStoreConnected)
-	storeWorker.Disconnected().Connect(connectionWorker.OnStoreDisconnected)
+	store.InteractorConnected().Connect(connectionWorker.OnStoreInteractorConnected)
+	store.InteractorDisconnected().Connect(connectionWorker.OnStoreInteractorDisconnected)
 
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))

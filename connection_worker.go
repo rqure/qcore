@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qcontext"
+	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
 	"github.com/rqure/qlib/pkg/qss"
@@ -40,8 +41,8 @@ type ConnectionWorker interface {
 	ClientDisconnected() qss.Signal[ClientDisconnectedArgs]
 	MessageReceived() qss.Signal[MessageReceivedArgs]
 
-	OnStoreConnected(context.Context)
-	OnStoreDisconnected(context.Context)
+	OnStoreInteractorConnected(qdata.ConnectedArgs)
+	OnStoreInteractorDisconnected(qdata.DisconnectedArgs)
 }
 
 type connectionWorker struct {
@@ -81,13 +82,13 @@ func (me *connectionWorker) MessageReceived() qss.Signal[MessageReceivedArgs] {
 	return me.messageReceived
 }
 
-func (me *connectionWorker) OnStoreConnected(ctx context.Context) {
+func (me *connectionWorker) OnStoreInteractorConnected(args qdata.ConnectedArgs) {
 	me.rwMu.Lock()
 	defer me.rwMu.Unlock()
 	me.isStoreConnected = true
 }
 
-func (me *connectionWorker) OnStoreDisconnected(ctx context.Context) {
+func (me *connectionWorker) OnStoreInteractorDisconnected(args qdata.DisconnectedArgs) {
 	me.rwMu.Lock()
 	defer me.rwMu.Unlock()
 	me.isStoreConnected = false
