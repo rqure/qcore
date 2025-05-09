@@ -18,6 +18,13 @@ func main() {
 	writeWorker := NewWriteWorker(store)
 	notificationWorker := NewNotificationWorker(store, notificationManager)
 	sessionWorker := NewSessionWorker(store)
+	connectionWorker := NewConnectionWorker()
+
+	connectionWorker.MessageReceived().Connect(readWorker.OnMessageReceived)
+	connectionWorker.MessageReceived().Connect(writeWorker.OnMessageReceived)
+	connectionWorker.MessageReceived().Connect(notificationWorker.OnMessageReceived)
+	connectionWorker.ClientConnected().Connect(notificationWorker.OnClientConnected)
+	connectionWorker.ClientDisconnected().Connect(notificationWorker.OnClientDisconnected)
 
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
@@ -38,5 +45,6 @@ func main() {
 	a.AddWorker(readWorker)
 	a.AddWorker(writeWorker)
 	a.AddWorker(notificationWorker)
+	a.AddWorker(connectionWorker)
 	a.Execute()
 }

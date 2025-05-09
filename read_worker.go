@@ -62,7 +62,6 @@ func (w *readWorker) OnMessageReceived(args MessageReceivedArgs) {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
 		w.handleQuery(args)
 	default:
-		qlog.Warn("Unknown message type: %v", args.Msg.Payload.TypeUrl)
 	}
 }
 

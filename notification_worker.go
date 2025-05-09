@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"time"
 
-	"github.com/nats-io/nats.go"
+	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
@@ -18,6 +17,7 @@ import (
 
 type NotificationWorker interface {
 	qapp.Worker
+	OnMessageReceived(args MessageReceivedArgs)
 }
 
 type notificationWorker struct {
@@ -38,46 +38,37 @@ func (me *notificationWorker) Init(ctx context.Context) {
 }
 
 func (me *notificationWorker) Deinit(context.Context) {}
-func (me *notificationWorker) DoWork(context.Context) {
-	startTime := time.Now()
-	defer func() {
-		qlog.Trace("Took %s to process", time.Since(startTime))
-	}()
+func (me *notificationWorker) DoWork(context.Context) {}
 
-	me.notifManager.ClearExpired()
-}
-
-func (me *notificationWorker) handleNotificationRequest(msg *nats.Msg) {
-	var apiMsg qprotobufs.ApiMessage
-	if err := proto.Unmarshal(msg.Data, &apiMsg); err != nil {
-		qlog.Warn("Could not unmarshal message: %v", err)
-		return
-	}
-
-	if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}) {
-		me.handleRegisterNotification(msg, &apiMsg)
-	} else if apiMsg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}) {
-		me.handleUnregisterNotification(msg, &apiMsg)
+// New method to handle messages, similar to read/write worker
+func (me *notificationWorker) OnMessageReceived(args MessageReceivedArgs) {
+	switch {
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}):
+		me.handleRegisterNotification(args)
+	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}):
+		me.handleUnregisterNotification(args)
+	default:
 	}
 }
 
-func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+// Refactored to use MessageReceivedArgs
+func (me *notificationWorker) handleRegisterNotification(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeRegisterNotificationRequest)
 	rsp := new(qprotobufs.ApiRuntimeRegisterNotificationResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_FAILURE
-		me.sendResponse(msg, rsp)
+		me.sendResponse(args, rsp)
 		return
 	}
 
-	for _, cfg := range req.Requests {
-		cfg := qnotify.FromConfigPb(cfg)
+	for _, cfgPb := range req.Requests {
+		cfg := qnotify.FromConfigPb(cfgPb)
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
 
 		me.handle.DoInMainThread(func(ctx context.Context) {
-			_, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, me.store)
+			_, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, me.store)
 			if !ok {
 				return
 			}
@@ -86,22 +77,22 @@ func (me *notificationWorker) handleRegisterNotification(msg *nats.Msg, apiMsg *
 	}
 
 	rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_SUCCESS
-	me.sendResponse(msg, rsp)
+	me.sendResponse(args, rsp)
 }
 
-func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg *qprotobufs.ApiMessage) {
+func (me *notificationWorker) handleUnregisterNotification(args MessageReceivedArgs) {
 	req := new(qprotobufs.ApiRuntimeUnregisterNotificationRequest)
 	rsp := new(qprotobufs.ApiRuntimeUnregisterNotificationResponse)
 
-	if err := apiMsg.Payload.UnmarshalTo(req); err != nil {
+	if err := args.Msg.Payload.UnmarshalTo(req); err != nil {
 		qlog.Warn("Could not unmarshal request: %v", err)
 		rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_FAILURE
-		me.sendResponse(msg, rsp)
+		me.sendResponse(args, rsp)
 		return
 	}
 
 	me.handle.DoInMainThread(func(ctx context.Context) {
-		_, ok := verifyAuthentication(ctx, apiMsg.Header.AccessToken, me.store)
+		_, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, me.store)
 		if !ok {
 			return
 		}
@@ -111,34 +102,27 @@ func (me *notificationWorker) handleUnregisterNotification(msg *nats.Msg, apiMsg
 	})
 
 	rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_SUCCESS
-	me.sendResponse(msg, rsp)
+	me.sendResponse(args, rsp)
 }
 
-func (me *notificationWorker) sendResponse(msg *nats.Msg, response proto.Message) {
-	if msg.Reply == "" {
-		return
-	}
-
-	apiMsg := &qprotobufs.ApiMessage{
-		Header: &qprotobufs.ApiHeader{
-			Timestamp: timestamppb.Now(),
-		},
-	}
+// Send response using websocket connection from MessageReceivedArgs
+func (me *notificationWorker) sendResponse(args MessageReceivedArgs, response proto.Message) {
+	args.Msg.Header.Timestamp = timestamppb.Now()
 
 	var err error
-	apiMsg.Payload, err = anypb.New(response)
+	args.Msg.Payload, err = anypb.New(response)
 	if err != nil {
 		qlog.Warn("Could not marshal response: %v", err)
 		return
 	}
 
-	data, err := proto.Marshal(apiMsg)
+	data, err := proto.Marshal(args.Msg)
 	if err != nil {
 		qlog.Warn("Could not marshal message: %v", err)
 		return
 	}
 
-	if err := msg.Respond(data); err != nil {
+	if err := args.Conn.Write(args.Ctx, websocket.MessageBinary, data); err != nil {
 		qlog.Warn("Could not send response: %v", err)
 	}
 }
