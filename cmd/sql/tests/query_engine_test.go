@@ -261,7 +261,7 @@ func TestAdvancedQueryFeatures(t *testing.T) {
 
 				// Check if we got any results
 				if len(results) == 0 {
-					// Try a simpler check to see if we have any users and roles 
+					// Try a simpler check to see if we have any users and roles
 					// to determine if this is a query syntax issue or data issue
 					t.Logf("No join results - verify that users have assigned roles in the system")
 					return
@@ -271,7 +271,7 @@ func TestAdvancedQueryFeatures(t *testing.T) {
 				for _, result := range results {
 					userName, hasUserName := result["UserName"]
 					roleName, hasRoleName := result["RoleName"]
-					
+
 					if !hasUserName || !hasRoleName {
 						t.Errorf("missing UserName or RoleName in result: %v", result)
 					} else {
@@ -358,7 +358,7 @@ func TestAdvancedQueryFeatures(t *testing.T) {
 				for _, result := range results {
 					folderName, hasFolderName := result["FolderName"]
 					permissionName, hasPermissionName := result["PermissionName"]
-					
+
 					if !hasFolderName || !hasPermissionName {
 						t.Errorf("missing FolderName or PermissionName in result: %v", result)
 					} else {
