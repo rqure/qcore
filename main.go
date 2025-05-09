@@ -39,12 +39,13 @@ func main() {
 	readinessWorker.BecameNotReady().Connect(sessionWorker.OnNotReady)
 
 	a := qapp.NewApplication("qcore")
+	a.AddWorker(connectionWorker)
+	a.AddWorker(initWorker)
 	a.AddWorker(sessionWorker)
 	a.AddWorker(storeWorker)
 	a.AddWorker(readinessWorker)
 	a.AddWorker(readWorker)
 	a.AddWorker(writeWorker)
 	a.AddWorker(notificationWorker)
-	a.AddWorker(connectionWorker)
 	a.Execute()
 }

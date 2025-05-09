@@ -106,11 +106,6 @@ func (me *sessionWorker) Deinit(context.Context) {
 }
 
 func (me *sessionWorker) DoWork(ctx context.Context) {
-	startTime := time.Now()
-	defer func() {
-		qlog.Trace("Took %s to process", time.Since(startTime))
-	}()
-
 	select {
 	case <-me.initTimer.C:
 		me.performInit(ctx)

@@ -105,13 +105,6 @@ func (me *connectionWorker) Deinit(ctx context.Context) {
 }
 
 func (me *connectionWorker) DoWork(ctx context.Context) {
-	// Wait for the context to be canceled or for the done channel to be closed
-	select {
-	case <-ctx.Done():
-		return
-	case <-me.done:
-		return
-	}
 }
 
 // handleWebSocket handles WebSocket connections
