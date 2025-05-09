@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/coder/websocket"
+	"github.com/rqure/qlib/pkg/qauthorization"
+	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qdata/qnotify"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -16,20 +18,21 @@ import (
 
 type NotificationManager interface {
 	PublishNotifications(args qdata.PublishNotificationArgs)
-	Register(conn *websocket.Conn, cfg qdata.NotificationConfig)
+	Register(conn *websocket.Conn, authorizer qauthorization.Authorizer, cfg qdata.NotificationConfig)
 	Unregister(conn *websocket.Conn, cfg qdata.NotificationConfig)
 }
 
 type notificationManager struct {
 	registeredNotifications map[*websocket.Conn]map[string]bool
+	connAuthorizers         map[*websocket.Conn]qauthorization.Authorizer
 	rwMu                    *sync.RWMutex
-
-	store qdata.StoreInteractor
+	store                   qdata.StoreInteractor
 }
 
 func NewNotificationManager(store qdata.StoreInteractor) NotificationManager {
 	return &notificationManager{
 		registeredNotifications: make(map[*websocket.Conn]map[string]bool),
+		connAuthorizers:         make(map[*websocket.Conn]qauthorization.Authorizer),
 		store:                   store,
 		rwMu:                    &sync.RWMutex{},
 	}
@@ -76,7 +79,8 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 			for _, ctxField := range cfg.GetContextFields() {
 				reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
 			}
-			me.store.Read(args.Ctx, reqs...)
+			ctx := context.WithValue(args.Ctx, qcontext.KeyAuthorizer, me.connAuthorizers[conn])
+			me.store.Read(ctx, reqs...)
 			for _, ctxReq := range reqs {
 				if ctxReq.Success {
 					notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
@@ -109,7 +113,8 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 			for _, ctxField := range cfg.GetContextFields() {
 				reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
 			}
-			me.store.Read(args.Ctx, reqs...)
+			ctx := context.WithValue(args.Ctx, qcontext.KeyAuthorizer, me.connAuthorizers[conn])
+			me.store.Read(ctx, reqs...)
 			for _, ctxReq := range reqs {
 				if ctxReq.Success {
 					notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
@@ -121,7 +126,7 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 	}
 }
 
-func (me *notificationManager) Register(conn *websocket.Conn, cfg qdata.NotificationConfig) {
+func (me *notificationManager) Register(conn *websocket.Conn, authorizer qauthorization.Authorizer, cfg qdata.NotificationConfig) {
 	me.rwMu.Lock()
 	defer me.rwMu.Unlock()
 
@@ -129,6 +134,7 @@ func (me *notificationManager) Register(conn *websocket.Conn, cfg qdata.Notifica
 		me.registeredNotifications[conn] = make(map[string]bool)
 	}
 
+	me.connAuthorizers[conn] = authorizer
 	me.registeredNotifications[conn][cfg.GetToken()] = true
 }
 
@@ -136,14 +142,14 @@ func (me *notificationManager) Unregister(conn *websocket.Conn, cfg qdata.Notifi
 	me.rwMu.Lock()
 	defer me.rwMu.Unlock()
 
-	if _, ok := me.registeredNotifications[conn]; !ok {
-		return
+	if _, ok := me.registeredNotifications[conn]; ok {
+		delete(me.registeredNotifications[conn], cfg.GetToken())
+		if len(me.registeredNotifications[conn]) == 0 {
+			delete(me.registeredNotifications, conn)
+		}
 	}
 
-	delete(me.registeredNotifications[conn], cfg.GetToken())
-	if len(me.registeredNotifications[conn]) == 0 {
-		delete(me.registeredNotifications, conn)
-	}
+	delete(me.connAuthorizers, conn)
 }
 
 func (me *notificationManager) sendNotification(ctx context.Context, conn *websocket.Conn, notifMsg *qprotobufs.DatabaseNotification) {

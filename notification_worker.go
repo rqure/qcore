@@ -70,16 +70,25 @@ func (me *notificationWorker) handleRegisterNotification(args MessageReceivedArg
 		return
 	}
 
-	_, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
+	authCtx, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
 	if !ok {
-		qlog.Warn("Authentication failed for request: %v", req)
+		qlog.Warn("Authentication failed")
+		rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+	authorizer, ok := qcontext.GetAuthorizer(authCtx)
+	if !ok {
+		qlog.Warn("Could not get authorizer from context")
+		rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_FAILURE
+		me.sendResponse(args, rsp)
 		return
 	}
 
 	for _, cfgPb := range req.Requests {
 		cfg := qnotify.FromConfigPb(cfgPb)
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
-		me.notifManager.Register(args.Conn, cfg)
+		me.notifManager.Register(args.Conn, authorizer, cfg)
 	}
 
 	rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_SUCCESS
