@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -49,11 +50,18 @@ func (me *notificationWorker) OnClientDisconnected(args ClientDisconnectedArgs) 
 }
 
 func (me *notificationWorker) OnMessageReceived(args MessageReceivedArgs) {
+	startTime := time.Now()
+	logTime := func() {
+		qlog.Trace("NotificationWorker: %s took %v", args.Msg.Payload.TypeUrl, time.Since(startTime))
+	}
+
 	switch {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}):
 		me.handleRegisterNotification(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeUnregisterNotificationRequest{}):
 		me.handleUnregisterNotification(args)
+		defer logTime()
 	default:
 	}
 }

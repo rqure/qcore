@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -95,9 +95,15 @@ func (me *connectionWorker) Init(ctx context.Context) {
 
 func (me *connectionWorker) Deinit(ctx context.Context) {
 	if me.server != nil {
-		log.Println("Shutting down WebSocket server")
+		qlog.Info("Shutting down WebSocket server")
+
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
 		if err := me.server.Shutdown(ctx); err != nil {
-			qlog.Error("WebSocket server shutdown error: %v", err)
+			qlog.Warn("WebSocket server shutdown error: %v", err)
+		} else {
+			qlog.Info("WebSocket server shut down successfully")
 		}
 	}
 

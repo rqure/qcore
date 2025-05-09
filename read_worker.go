@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -42,25 +43,39 @@ func (w *readWorker) Deinit(context.Context) {}
 func (w *readWorker) DoWork(context.Context) {}
 
 func (w *readWorker) OnMessageReceived(args MessageReceivedArgs) {
+	startTime := time.Now()
+	logTime := func() {
+		qlog.Trace("ReadWorker: %s took %v", args.Msg.Payload.TypeUrl, time.Since(startTime))
+	}
+
 	switch {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetEntityTypesRequest{}):
 		w.handleGetEntityTypes(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigGetEntitySchemaRequest{}):
 		w.handleGetEntitySchema(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigGetRootRequest{}):
 		w.handleGetRoot(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeFindEntitiesRequest{}):
 		w.handleGetEntities(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeFieldExistsRequest{}):
 		w.handleFieldExists(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeEntityExistsRequest{}):
 		w.handleEntityExists(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeGetDatabaseConnectionStatusRequest{}):
 		w.handleGetDatabaseConnectionStatus(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
 		w.handleDatabaseRequest(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeQueryRequest{}):
 		w.handleQuery(args)
+		defer logTime()
 	default:
 	}
 }

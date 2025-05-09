@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -49,17 +50,27 @@ func (w *writeWorker) Init(ctx context.Context) {
 }
 
 func (w *writeWorker) OnMessageReceived(args MessageReceivedArgs) {
+	startTime := time.Now()
+	logTime := func() {
+		qlog.Trace("WriteWorker: %s took %v", args.Msg.Payload.TypeUrl, time.Since(startTime))
+	}
+
 	switch {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigCreateEntityRequest{}):
 		w.handleCreateEntity(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigDeleteEntityRequest{}):
 		w.handleDeleteEntity(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigSetEntitySchemaRequest{}):
 		w.handleSetEntitySchema(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiConfigRestoreSnapshotRequest{}):
 		w.handleRestoreSnapshot(args)
+		defer logTime()
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeDatabaseRequest{}):
 		w.handleDatabaseRequest(args)
+		defer logTime()
 	default:
 	}
 }
