@@ -7,8 +7,8 @@ import (
 )
 
 func main() {
-	notificationManager := NewNotificationManager()
 	store := qstore.New2()
+	notificationManager := NewNotificationManager(store)
 
 	initWorker := NewInitWorker(store)
 	storeWorker := qworkers.NewStore(store)

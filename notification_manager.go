@@ -1,36 +1,37 @@
 package main
 
 import (
-	"time"
+	"context"
+	"sync"
 
+	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qdata"
+	"github.com/rqure/qlib/pkg/qdata/qnotify"
 	"github.com/rqure/qlib/pkg/qlog"
 	"github.com/rqure/qlib/pkg/qprotobufs"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const LeaseDuration = 1 * time.Minute
-
-type NotificationLease struct {
-	Config   qdata.NotificationConfig
-	ExpireAt time.Time
-}
-
 type NotificationManager interface {
-	Register(qdata.NotificationConfig)
-	Unregister(qdata.NotificationConfig)
-
-	ClearExpired()
+	PublishNotifications(args qdata.PublishNotificationArgs)
+	Register(conn *websocket.Conn, cfg qdata.NotificationConfig)
+	Unregister(conn *websocket.Conn, cfg qdata.NotificationConfig)
 }
 
 type notificationManager struct {
-	registeredNotifications map[string]map[string]NotificationLease
+	registeredNotifications map[*websocket.Conn]map[string]bool
+	rwMu                    *sync.RWMutex
 
-	store *qdata.Store
+	store qdata.StoreInteractor
 }
 
-func NewNotificationManager() NotificationManager {
+func NewNotificationManager(store qdata.StoreInteractor) NotificationManager {
 	return &notificationManager{
-		registeredNotifications: make(map[string]map[string]NotificationLease),
+		registeredNotifications: make(map[*websocket.Conn]map[string]bool),
+		store:                   store,
+		rwMu:                    &sync.RWMutex{},
 	}
 }
 
@@ -51,136 +52,123 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 		return
 	}
 
-	leases := me.getEntityLeases(args.Curr.EntityId.AsString())
-
-	for _, lease := range leases {
-		cfg := lease.Config
-		if cfg.GetNotifyOnChange() && !changed {
-			continue
-		}
-
-		notifMsg := &qprotobufs.DatabaseNotification{
-			Token:    cfg.GetToken(),
-			Current:  args.Curr.AsField().AsFieldPb(),
-			Previous: args.Prev.AsField().AsFieldPb(),
-			Context:  []*qprotobufs.DatabaseField{},
-		}
-
-		reqs := []*qdata.Request{}
-		for _, ctxField := range cfg.GetContextFields() {
-			reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
-		}
-		me.store.Read(args.Ctx, reqs...)
-		for _, ctxReq := range reqs {
-			if ctxReq.Success {
-				notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
-			}
-		}
-
-		// Choose the appropriate subject based on distribution setting
-		if cfg.IsDistributed() {
-			// For distributed notifications, use a queue subject
-			// This ensures only one subscriber receives the notification
-		} else {
-			// For non-distributed notifications, use the regular subject
-			// All subscribers will receive the notification
-		}
-	}
-
-	fetchedEntity := new(qdata.Entity).Init(indirectEntity)
-	typeLeases := me.getEntityLeases(fetchedEntity.EntityType.AsString())
-
-	for _, lease := range typeLeases {
-		cfg := lease.Config
-
-		if cfg.GetNotifyOnChange() && !changed {
-			continue
-		}
-
-		notifMsg := &qprotobufs.DatabaseNotification{
-			Token:    cfg.GetToken(),
-			Current:  args.Curr.AsField().AsFieldPb(),
-			Previous: args.Prev.AsField().AsFieldPb(),
-			Context:  []*qprotobufs.DatabaseField{},
-		}
-
-		reqs := []*qdata.Request{}
-		for _, ctxField := range cfg.GetContextFields() {
-			reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
-		}
-		me.store.Read(args.Ctx, reqs...)
-		for _, ctxReq := range reqs {
-			if ctxReq.Success {
-				notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
-			}
-		}
-
-		// Choose the appropriate subject based on distribution setting
-		if cfg.IsDistributed() {
-			// For distributed notifications, use a queue subject
-			// This ensures only one subscriber receives the notification
-		} else {
-			// For non-distributed notifications, use the regular subject
-			// All subscribers will receive the notification
-		}
-	}
-}
-
-// Helper method to safely get entity leases
-func (me *notificationManager) getEntityLeases(entityIdOrType string) []NotificationLease {
-	if leases, ok := me.registeredNotifications[entityIdOrType]; ok {
-		result := make([]NotificationLease, 0, len(leases))
-		for _, lease := range leases {
-			result = append(result, lease)
-		}
-		return result
-	}
-	return nil
-}
-
-func (me *notificationManager) Register(cfg qdata.NotificationConfig) {
-	lease := NotificationLease{
-		Config:   cfg,
-		ExpireAt: time.Now().Add(LeaseDuration),
-	}
-
-	entityId := string(cfg.GetEntityId())
-	if me.registeredNotifications[entityId] == nil {
-		me.registeredNotifications[entityId] = make(map[string]NotificationLease)
-	}
-
-	me.registeredNotifications[entityId][cfg.GetToken()] = lease
-}
-
-func (me *notificationManager) Unregister(cfg qdata.NotificationConfig) {
-	entityId := string(cfg.GetEntityId())
-	if me.registeredNotifications[entityId] == nil {
-		return
-	}
-
-	delete(me.registeredNotifications[entityId], cfg.GetToken())
-
-	if len(me.registeredNotifications[entityId]) == 0 {
-		delete(me.registeredNotifications, entityId)
-	}
-}
-
-func (me *notificationManager) ClearExpired() {
-	activeLeases := make(map[string]map[string]NotificationLease)
-
-	for entityId, leases := range me.registeredNotifications {
-		for token, lease := range leases {
-			if time.Now().After(lease.ExpireAt) {
+	me.rwMu.RLock()
+	defer me.rwMu.RUnlock()
+	for conn, tokens := range me.registeredNotifications {
+		for token := range tokens {
+			cfg := qnotify.FromToken(token)
+			if cfg.GetEntityId() != args.Curr.EntityId {
 				continue
 			}
 
-			if activeLeases[entityId] == nil {
-				activeLeases[entityId] = make(map[string]NotificationLease)
+			if cfg.GetNotifyOnChange() && !changed {
+				continue
 			}
 
-			activeLeases[entityId][token] = lease
+			notifMsg := &qprotobufs.DatabaseNotification{
+				Token:    cfg.GetToken(),
+				Current:  args.Curr.AsField().AsFieldPb(),
+				Previous: args.Prev.AsField().AsFieldPb(),
+				Context:  []*qprotobufs.DatabaseField{},
+			}
+
+			reqs := []*qdata.Request{}
+			for _, ctxField := range cfg.GetContextFields() {
+				reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
+			}
+			me.store.Read(args.Ctx, reqs...)
+			for _, ctxReq := range reqs {
+				if ctxReq.Success {
+					notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
+				}
+			}
+
+			me.sendNotification(args.Ctx, conn, notifMsg)
 		}
 	}
 
-	me.registeredNotifications = activeLeases
+	for conn, tokens := range me.registeredNotifications {
+		for token := range tokens {
+			cfg := qnotify.FromToken(token)
+			if cfg.GetEntityType() != args.Curr.EntityId.GetEntityType() {
+				continue
+			}
+
+			if cfg.GetNotifyOnChange() && !changed {
+				continue
+			}
+
+			notifMsg := &qprotobufs.DatabaseNotification{
+				Token:    cfg.GetToken(),
+				Current:  args.Curr.AsField().AsFieldPb(),
+				Previous: args.Prev.AsField().AsFieldPb(),
+				Context:  []*qprotobufs.DatabaseField{},
+			}
+
+			reqs := []*qdata.Request{}
+			for _, ctxField := range cfg.GetContextFields() {
+				reqs = append(reqs, new(qdata.Request).Init(indirectEntity, ctxField))
+			}
+			me.store.Read(args.Ctx, reqs...)
+			for _, ctxReq := range reqs {
+				if ctxReq.Success {
+					notifMsg.Context = append(notifMsg.Context, ctxReq.AsField().AsFieldPb())
+				}
+			}
+
+			me.sendNotification(args.Ctx, conn, notifMsg)
+		}
+	}
+}
+
+func (me *notificationManager) Register(conn *websocket.Conn, cfg qdata.NotificationConfig) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+
+	if _, ok := me.registeredNotifications[conn]; !ok {
+		me.registeredNotifications[conn] = make(map[string]bool)
+	}
+
+	me.registeredNotifications[conn][cfg.GetToken()] = true
+}
+
+func (me *notificationManager) Unregister(conn *websocket.Conn, cfg qdata.NotificationConfig) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+
+	if _, ok := me.registeredNotifications[conn]; !ok {
+		return
+	}
+
+	delete(me.registeredNotifications[conn], cfg.GetToken())
+	if len(me.registeredNotifications[conn]) == 0 {
+		delete(me.registeredNotifications, conn)
+	}
+}
+
+func (me *notificationManager) sendNotification(ctx context.Context, conn *websocket.Conn, notifMsg *qprotobufs.DatabaseNotification) {
+	anyMsg, err := anypb.New(notifMsg)
+	if err != nil {
+		qlog.Warn("Could not marshal notification message: %v", err)
+		return
+	}
+
+	msg := &qprotobufs.ApiMessage{
+		Header: &qprotobufs.ApiHeader{
+			Timestamp: timestamppb.Now(),
+		},
+		Payload: anyMsg,
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		qlog.Warn("Could not marshal message: %v", err)
+		return
+	}
+
+	if err := conn.Write(ctx, websocket.MessageBinary, data); err != nil {
+		qlog.Warn("Could not send notification: %v", err)
+	}
+
+	qlog.Trace("Sent notification: %v", notifMsg)
 }

@@ -18,6 +18,8 @@ import (
 type NotificationWorker interface {
 	qapp.Worker
 	OnMessageReceived(args MessageReceivedArgs)
+	OnClientConnected(args ClientConnectedArgs)
+	OnClientDisconnected(args ClientDisconnectedArgs)
 }
 
 type notificationWorker struct {
@@ -40,7 +42,12 @@ func (me *notificationWorker) Init(ctx context.Context) {
 func (me *notificationWorker) Deinit(context.Context) {}
 func (me *notificationWorker) DoWork(context.Context) {}
 
-// New method to handle messages, similar to read/write worker
+func (me *notificationWorker) OnClientConnected(args ClientConnectedArgs) {
+}
+
+func (me *notificationWorker) OnClientDisconnected(args ClientDisconnectedArgs) {
+}
+
 func (me *notificationWorker) OnMessageReceived(args MessageReceivedArgs) {
 	switch {
 	case args.Msg.Payload.MessageIs(&qprotobufs.ApiRuntimeRegisterNotificationRequest{}):
@@ -63,17 +70,16 @@ func (me *notificationWorker) handleRegisterNotification(args MessageReceivedArg
 		return
 	}
 
+	_, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
+	if !ok {
+		qlog.Warn("Authentication failed for request: %v", req)
+		return
+	}
+
 	for _, cfgPb := range req.Requests {
 		cfg := qnotify.FromConfigPb(cfgPb)
 		rsp.Tokens = append(rsp.Tokens, cfg.GetToken())
-
-		me.handle.DoInMainThread(func(ctx context.Context) {
-			_, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, me.store)
-			if !ok {
-				return
-			}
-			me.notifManager.Register(cfg)
-		})
+		me.notifManager.Register(args.Conn, cfg)
 	}
 
 	rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_SUCCESS
@@ -91,15 +97,14 @@ func (me *notificationWorker) handleUnregisterNotification(args MessageReceivedA
 		return
 	}
 
-	me.handle.DoInMainThread(func(ctx context.Context) {
-		_, ok := verifyAuthentication(ctx, args.Msg.Header.AccessToken, me.store)
-		if !ok {
-			return
-		}
-		for _, token := range req.Tokens {
-			me.notifManager.Unregister(qnotify.FromToken(token))
-		}
-	})
+	_, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
+	if !ok {
+		return
+	}
+
+	for _, token := range req.Tokens {
+		me.notifManager.Unregister(args.Conn, qnotify.FromToken(token))
+	}
 
 	rsp.Status = qprotobufs.ApiRuntimeUnregisterNotificationResponse_SUCCESS
 	me.sendResponse(args, rsp)
