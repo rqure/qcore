@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"net/http"
-	"time"
+	"strings"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
@@ -38,6 +39,9 @@ type ConnectionWorker interface {
 	ClientConnected() qss.Signal[ClientConnectedArgs]
 	ClientDisconnected() qss.Signal[ClientDisconnectedArgs]
 	MessageReceived() qss.Signal[MessageReceivedArgs]
+
+	OnStoreConnected(context.Context)
+	OnStoreDisconnected(context.Context)
 }
 
 type connectionWorker struct {
@@ -48,6 +52,10 @@ type connectionWorker struct {
 	clientConnected    qss.Signal[ClientConnectedArgs]
 	clientDisconnected qss.Signal[ClientDisconnectedArgs]
 	messageReceived    qss.Signal[MessageReceivedArgs]
+
+	isStoreConnected bool
+
+	rwMu *sync.RWMutex
 }
 
 func NewConnectionWorker() ConnectionWorker {
@@ -56,6 +64,8 @@ func NewConnectionWorker() ConnectionWorker {
 		clientConnected:    qss.New[ClientConnectedArgs](),
 		clientDisconnected: qss.New[ClientDisconnectedArgs](),
 		messageReceived:    qss.New[MessageReceivedArgs](),
+		isStoreConnected:   false,
+		rwMu:               &sync.RWMutex{},
 	}
 }
 
@@ -69,6 +79,24 @@ func (me *connectionWorker) ClientDisconnected() qss.Signal[ClientDisconnectedAr
 
 func (me *connectionWorker) MessageReceived() qss.Signal[MessageReceivedArgs] {
 	return me.messageReceived
+}
+
+func (me *connectionWorker) OnStoreConnected(ctx context.Context) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+	me.isStoreConnected = true
+}
+
+func (me *connectionWorker) OnStoreDisconnected(ctx context.Context) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+	me.isStoreConnected = false
+}
+
+func (me *connectionWorker) IsStoreConnected() bool {
+	me.rwMu.RLock()
+	defer me.rwMu.RUnlock()
+	return me.isStoreConnected
 }
 
 func (me *connectionWorker) Init(ctx context.Context) {
@@ -97,9 +125,6 @@ func (me *connectionWorker) Deinit(ctx context.Context) {
 	if me.server != nil {
 		qlog.Info("Shutting down WebSocket server")
 
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
 		if err := me.server.Shutdown(ctx); err != nil {
 			qlog.Warn("WebSocket server shutdown error: %v", err)
 		} else {
@@ -115,6 +140,12 @@ func (me *connectionWorker) DoWork(ctx context.Context) {
 
 // handleWebSocket handles WebSocket connections
 func (me *connectionWorker) handleWebSocket(rw http.ResponseWriter, r *http.Request) {
+	if !me.IsStoreConnected() {
+		qlog.Warn("WebSocket server is not ready")
+		http.Error(rw, "Server not ready", http.StatusServiceUnavailable)
+		return
+	}
+
 	r = r.WithContext(me.handle.Ctx())
 
 	conn, err := websocket.Accept(rw, r, nil)
@@ -128,9 +159,14 @@ func (me *connectionWorker) handleWebSocket(rw http.ResponseWriter, r *http.Requ
 	me.clientConnected.Emit(ClientConnectedArgs{Ctx: r.Context(), Conn: conn})
 
 	// Simple echo server for demonstration
-	for {
+	for me.IsStoreConnected() {
 		messageType, p, err := conn.Read(r.Context())
+
 		if err != nil {
+			if strings.Contains(err.Error(), "EOF") {
+				break
+			}
+
 			qlog.Warn("Error reading message: %v", err)
 			break
 		}

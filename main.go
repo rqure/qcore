@@ -26,6 +26,9 @@ func main() {
 	connectionWorker.ClientConnected().Connect(notificationWorker.OnClientConnected)
 	connectionWorker.ClientDisconnected().Connect(notificationWorker.OnClientDisconnected)
 
+	storeWorker.Connected().Connect(connectionWorker.OnStoreConnected)
+	storeWorker.Disconnected().Connect(connectionWorker.OnStoreDisconnected)
+
 	readinessWorker := qworkers.NewReadiness()
 	readinessWorker.AddCriteria(qworkers.NewStoreConnectedCriteria(storeWorker, readinessWorker))
 	readinessWorker.AddCriteria(NewSessionReadyCriteria(sessionWorker))
