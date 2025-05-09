@@ -14,11 +14,11 @@ func main() {
 	storeWorker := qworkers.NewStore(store)
 	storeWorker.Connected().Connect(initWorker.OnConnected)
 
+	connectionWorker := NewConnectionWorker()
 	readWorker := NewReadWorker(store)
 	writeWorker := NewWriteWorker(store)
 	notificationWorker := NewNotificationWorker(store, notificationManager)
 	sessionWorker := NewSessionWorker(store)
-	connectionWorker := NewConnectionWorker()
 
 	connectionWorker.MessageReceived().Connect(readWorker.OnMessageReceived)
 	connectionWorker.MessageReceived().Connect(writeWorker.OnMessageReceived)
