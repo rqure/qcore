@@ -440,7 +440,7 @@ func (w *readWorker) handleQuery(args MessageReceivedArgs) {
 	}
 
 	if req.Engine == "" {
-		req.Query = string(qdata.QEExprLang)
+		req.Query = string(qdata.QESqlite)
 	}
 
 	opts = append(opts, qdata.POPageSize(pageSize))

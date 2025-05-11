@@ -166,18 +166,18 @@ func (me *sessionWorker) performInit(ctx context.Context) {
 func (me *sessionWorker) OnReady(ctx context.Context) {
 	me.isReady = true
 
-	iter, err := me.store.PrepareQuery(`SELECT "$EntityId", LastEventTime FROM SessionController`)
+	controllers, err := me.store.Find(ctx,
+		qdata.ETSessionController,
+		[]qdata.FieldType{qdata.FTLastEventTime})
 	if err != nil {
-		qlog.Warn("Failed to prepare query: %v", err)
+		qlog.Warn("Failed to find SessionControllers: %v", err)
 		return
 	}
 
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		sessionController := row.AsEntity()
+	for _, sessionController := range controllers {
 		lastEventTime := sessionController.Field(qdata.FTLastEventTime).Value.GetTimestamp()
 		me.eventEmitter.SetLastEventTime(lastEventTime)
-		return true
-	})
+	}
 }
 
 func (me *sessionWorker) OnNotReady(context.Context) {
@@ -200,19 +200,19 @@ func (me *sessionWorker) handleKeycloakEvent(e qauthentication.EmittedEvent) {
 
 	qlog.Trace("Received Keycloak event: %s", toString(e.Event))
 
-	iter, err := me.store.PrepareQuery(`SELECT "$EntityId", LastEventTime FROM SessionController`)
+	controllers, err := me.store.Find(e.Ctx,
+		qdata.ETSessionController,
+		[]qdata.FieldType{qdata.FTLastEventTime})
 	if err != nil {
 		qlog.Warn("Failed to prepare query: %v", err)
 		return
 	}
 
 	reqs := []*qdata.Request{}
-	iter.ForEach(e.Ctx, func(row qdata.QueryRow) bool {
-		sessionController := row.AsEntity()
+	for _, sessionController := range controllers {
 		sessionController.Field(qdata.FTLastEventTime).Value.SetTimestamp(time.Now())
 		reqs = append(reqs, sessionController.Field(qdata.FTLastEventTime).AsWriteRequest())
-		return true
-	})
+	}
 
 	err = me.store.Write(e.Ctx, reqs...)
 	if err != nil {
@@ -234,22 +234,26 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 
 	SourceOfTruth_QOS := 0
 	SourceOfTruth_Keycloak := 1
-	iter, err := me.store.PrepareQuery(`SELECT Name, SourceOfTruth, Parent FROM User WHERE Parent = %q`, usersFolder.EntityId)
+	users, err := me.store.Find(ctx,
+		qdata.ETUser,
+		[]qdata.FieldType{qdata.FTName, qdata.FTSourceOfTruth, qdata.FTParent},
+		func(e *qdata.Entity) bool {
+			return e.Field(qdata.FTParent).Value.GetEntityReference() == usersFolder.EntityId
+		})
 	if err != nil {
 		return fmt.Errorf("failed to prepare query: %w", err)
 	}
 
 	// 1. Sync store users to Keycloak
 	storeUsersByName := make(map[string]*qdata.Entity)
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		user := row.AsEntity()
+	for _, user := range users {
 		name := user.Field(qdata.FTName).Value.GetString()
 		sourceOfTruth := user.Field("SourceOfTruth").Value.GetChoice()
 
 		storeUsersByName[name] = user
 
 		if sourceOfTruth != SourceOfTruth_QOS {
-			return true // continue to next user
+			continue
 		}
 
 		// Create user in Keycloak if it doesn't exist
@@ -259,9 +263,7 @@ func (me *sessionWorker) performFullSync(ctx context.Context) error {
 				qlog.Error("Failed to sync user %s to Keycloak: %v", name, err)
 			}
 		}
-
-		return true // continue to next user
-	})
+	}
 
 	// 2. Sync Keycloak users to store
 	reqs := []*qdata.Request{}

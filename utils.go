@@ -36,41 +36,41 @@ func verifyAuthentication(ctx context.Context, accessToken string, store qdata.S
 	var authCtx context.Context
 
 	// Check if accessor is a User
-	iter, err := store.PrepareQuery(`SELECT "$EntityId" FROM User WHERE Name = %q`, accessorName)
+	users, err := store.Find(ctx,
+		qdata.ETUser,
+		[]qdata.FieldType{qdata.FTName},
+		func(e *qdata.Entity) bool { return e.Field(qdata.FTName).Value.GetString() == accessorName })
 	if err != nil {
 		qlog.Warn("Could not prepare query: %v", err)
 		return nil, false
 	}
 
-	iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-		user := row.AsEntity()
+	for _, user := range users {
 		authCtx = context.WithValue(
 			ctx,
 			qcontext.KeyAuthorizer,
 			qauthorization.NewAuthorizer(user.EntityId, store))
 		found = true
-		return false // Break after first user
-	})
-	iter.Close()
+	}
 
 	// If not found, check if accessor is a Client
 	if !found {
-		iter, err = store.PrepareQuery(`SELECT "$EntityId" FROM Client WHERE Name = %q`, accessorName)
+		clients, err := store.Find(ctx,
+			qdata.ETClient,
+			[]qdata.FieldType{qdata.FTName},
+			func(e *qdata.Entity) bool { return e.Field(qdata.FTName).Value.GetString() == accessorName })
 		if err != nil {
 			qlog.Warn("Could not prepare query: %v", err)
 			return nil, false
 		}
 
-		iter.ForEach(ctx, func(row qdata.QueryRow) bool {
-			client := row.AsEntity()
+		for _, client := range clients {
 			authCtx = context.WithValue(
 				ctx,
 				qcontext.KeyAuthorizer,
 				qauthorization.NewAuthorizer(client.EntityId, store))
 			found = true
-			return false // Break after first client
-		})
-		iter.Close()
+		}
 	}
 
 	// Special case for qinitdb client
