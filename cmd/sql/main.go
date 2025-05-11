@@ -47,7 +47,7 @@ func init() {
 	flag.StringVar(&logLevel, "log-level", "WARN", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&libLogLevel, "lib-log-level", "WARN", "Set library log level (TRACE, DEBUG, INFO, WARN, ERROR, PANIC)")
 	flag.StringVar(&outputFormat, "format", "table", "Output format (table, plain, unicode, unicodelight, unicodebold, colon, csv, github, json, xml)")
-	flag.StringVar(&queryEngine, "engine", "exprlang", "Query engine to use (expr, sqlite, etc.)")
+	flag.StringVar(&queryEngine, "engine", string(qdata.QESqlite), "Query engine to use (expr, sqlite, etc.)")
 	flag.Parse()
 }
 
