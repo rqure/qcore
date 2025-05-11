@@ -24,15 +24,17 @@ type NotificationWorker interface {
 }
 
 type notificationWorker struct {
-	store        *qdata.Store
-	notifManager NotificationManager
-	handle       qcontext.Handle
+	store          *qdata.Store
+	notifManager   NotificationManager
+	subjectManager SubjectManager
+	handle         qcontext.Handle
 }
 
-func NewNotificationWorker(store *qdata.Store, notifManager NotificationManager) NotificationWorker {
+func NewNotificationWorker(store *qdata.Store, notifManager NotificationManager, subjectManager SubjectManager) NotificationWorker {
 	return &notificationWorker{
-		store:        store,
-		notifManager: notifManager,
+		store:          store,
+		notifManager:   notifManager,
+		subjectManager: subjectManager,
 	}
 }
 
@@ -44,9 +46,11 @@ func (me *notificationWorker) Deinit(context.Context) {}
 func (me *notificationWorker) DoWork(context.Context) {}
 
 func (me *notificationWorker) OnClientConnected(args ClientConnectedArgs) {
+	me.notifManager.AddConn(args.Conn)
 }
 
 func (me *notificationWorker) OnClientDisconnected(args ClientDisconnectedArgs) {
+	me.notifManager.RemoveConn(args.Conn)
 }
 
 func (me *notificationWorker) OnMessageReceived(args MessageReceivedArgs) {
@@ -78,7 +82,7 @@ func (me *notificationWorker) handleRegisterNotification(args MessageReceivedArg
 		return
 	}
 
-	authCtx, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
+	authCtx, ok := me.subjectManager.Verify(args.Ctx, args.Msg.Header.AccessToken)
 	if !ok {
 		qlog.Warn("Authentication failed")
 		rsp.Status = qprotobufs.ApiRuntimeRegisterNotificationResponse_FAILURE
@@ -114,7 +118,7 @@ func (me *notificationWorker) handleUnregisterNotification(args MessageReceivedA
 		return
 	}
 
-	_, ok := verifyAuthentication(args.Ctx, args.Msg.Header.AccessToken, me.store)
+	_, ok := me.subjectManager.Verify(args.Ctx, args.Msg.Header.AccessToken)
 	if !ok {
 		return
 	}

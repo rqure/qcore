@@ -20,6 +20,8 @@ type NotificationManager interface {
 	PublishNotifications(args qdata.PublishNotificationArgs)
 	Register(conn *websocket.Conn, authorizer qauthorization.Authorizer, cfg qdata.NotificationConfig)
 	Unregister(conn *websocket.Conn, cfg qdata.NotificationConfig)
+	AddConn(conn *websocket.Conn)
+	RemoveConn(conn *websocket.Conn)
 }
 
 type notificationManager struct {
@@ -124,6 +126,23 @@ func (me *notificationManager) PublishNotifications(args qdata.PublishNotificati
 			me.sendNotification(args.Ctx, conn, notifMsg)
 		}
 	}
+}
+
+func (me *notificationManager) AddConn(conn *websocket.Conn) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+
+	if _, ok := me.registeredNotifications[conn]; !ok {
+		me.registeredNotifications[conn] = make(map[string]bool)
+	}
+}
+
+func (me *notificationManager) RemoveConn(conn *websocket.Conn) {
+	me.rwMu.Lock()
+	defer me.rwMu.Unlock()
+
+	delete(me.registeredNotifications, conn)
+	delete(me.connAuthorizers, conn)
 }
 
 func (me *notificationManager) Register(conn *websocket.Conn, authorizer qauthorization.Authorizer, cfg qdata.NotificationConfig) {

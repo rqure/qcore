@@ -9,15 +9,18 @@ import (
 func main() {
 	store := qstore.New2()
 	notificationManager := NewNotificationManager(store)
+	subjectManager := NewSubjectManager(store)
 
 	initWorker := NewInitWorker(store)
 	storeWorker := qworkers.NewStore(store)
 	storeWorker.Connected().Connect(initWorker.OnConnected)
+	storeWorker.EntityCreated().Connect(subjectManager.OnEntityCreated)
+	storeWorker.EntityDeleted().Connect(subjectManager.OnEntityDeleted)
 
 	connectionWorker := NewConnectionWorker()
-	readWorker := NewReadWorker(store)
-	writeWorker := NewWriteWorker(store)
-	notificationWorker := NewNotificationWorker(store, notificationManager)
+	readWorker := NewReadWorker(store, subjectManager)
+	writeWorker := NewWriteWorker(store, subjectManager)
+	notificationWorker := NewNotificationWorker(store, notificationManager, subjectManager)
 	sessionWorker := NewSessionWorker(store)
 
 	connectionWorker.MessageReceived().Connect(readWorker.OnMessageReceived)
@@ -36,6 +39,7 @@ func main() {
 	readinessWorker.BecameReady().Connect(readWorker.OnReady)
 	readinessWorker.BecameReady().Connect(writeWorker.OnReady)
 	readinessWorker.BecameReady().Connect(sessionWorker.OnReady)
+	readinessWorker.BecameReady().Connect(subjectManager.OnReady)
 
 	readinessWorker.BecameNotReady().Connect(readWorker.OnNotReady)
 	readinessWorker.BecameNotReady().Connect(writeWorker.OnNotReady)
