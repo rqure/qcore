@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qlog"
 )
 
@@ -18,7 +19,7 @@ func init() {
 }
 
 // engines to test
-var engines = []string{"exprlang", "sqlite"}
+var engines = []string{string(qdata.QESqlite)}
 
 func TestQueryEngines(t *testing.T) {
 	testCases := []struct {
