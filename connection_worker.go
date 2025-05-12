@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/rqure/qlib/pkg/qapp"
+	"github.com/rqure/qlib/pkg/qauthentication"
 	"github.com/rqure/qlib/pkg/qcontext"
 	"github.com/rqure/qlib/pkg/qdata"
 	"github.com/rqure/qlib/pkg/qlog"
@@ -17,6 +19,20 @@ import (
 )
 
 const DefaultAddr = ":7860"
+
+// AuthRequest represents credentials sent in authentication requests
+type AuthRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// AuthResponse represents the response to an authentication request
+type AuthResponse struct {
+	Success  bool   `json:"success"`
+	Username string `json:"username,omitempty"`
+	Token    string `json:"token,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
 
 type ClientConnectedArgs struct {
 	Ctx  context.Context
@@ -106,6 +122,9 @@ func (me *connectionWorker) Init(ctx context.Context) {
 	// Create a new HTTP server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", me.handleWebSocket)
+
+	// Register the auth handler
+	mux.HandleFunc("/auth", me.handleAuth)
 
 	// Initialize the HTTP server
 	me.server = &http.Server{
@@ -199,4 +218,109 @@ func (me *connectionWorker) handleWebSocket(rw http.ResponseWriter, r *http.Requ
 
 	qlog.Info("Client disconnected: %s", r.RemoteAddr)
 	me.clientDisconnected.Emit(ClientDisconnectedArgs{Ctx: r.Context(), Conn: conn})
+}
+
+// handleAuth handles authentication requests
+func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) {
+	// Set CORS headers to allow cross-origin requests
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// If no origin is set, allow all origins during development
+		origin = "*"
+	}
+
+	// Set comprehensive CORS headers
+	rw.Header().Set("Access-Control-Allow-Origin", origin)
+	rw.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	rw.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+	rw.Header().Set("Access-Control-Allow-Credentials", "true")
+	rw.Header().Set("Access-Control-Max-Age", "86400") // 24 hours cache for preflight
+
+	// Handle preflight OPTIONS requests
+	if r.Method == http.MethodOptions {
+		rw.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow POST method for authentication
+	if r.Method != http.MethodPost {
+		http.Error(rw, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if the store is connected before proceeding
+	if !me.IsStoreConnected() {
+		qlog.Warn("Auth server is not ready")
+		http.Error(rw, "Server not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse the authentication request
+	var authReq AuthRequest
+	err := json.NewDecoder(r.Body).Decode(&authReq)
+	if err != nil {
+		qlog.Warn("Failed to parse auth request: %v", err)
+		http.Error(rw, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if authReq.Username == "" || authReq.Password == "" {
+		sendAuthResponse(rw, AuthResponse{
+			Success: false,
+			Message: "Username and password are required",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	// Use the existing context with the request context
+	rspCh := make(chan AuthResponse, 1)
+	me.handle.DoInMainThread(func(ctx context.Context) {
+		clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
+		client := clientProvider.Client(ctx)
+		if client == nil {
+			qlog.Warn("Client not found")
+			rspCh <- AuthResponse{
+				Success: false,
+				Message: "Client not found",
+			}
+			return
+		}
+		session := client.CreateUserSession(ctx, authReq.Username, authReq.Password)
+		if session == nil {
+			qlog.Warn("Failed to create user session")
+			rspCh <- AuthResponse{
+				Success: false,
+				Message: "Failed to create user session",
+			}
+			return
+		}
+
+		rspCh <- AuthResponse{
+			Success:  true,
+			Username: authReq.Username,
+			Token:    session.AccessToken(),
+			Message:  "Authentication successful",
+		}
+	})
+
+	rsp := <-rspCh
+	if !rsp.Success {
+		sendAuthResponse(rw, rsp, http.StatusUnauthorized)
+		return
+	}
+
+	qlog.Info("User authenticated: %s", authReq.Username)
+	sendAuthResponse(rw, rsp, http.StatusOK)
+}
+
+// sendAuthResponse sends a JSON response with appropriate headers and status code
+func sendAuthResponse(rw http.ResponseWriter, response AuthResponse, statusCode int) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(statusCode)
+
+	// Encode and send the response
+	if err := json.NewEncoder(rw).Encode(response); err != nil {
+		qlog.Warn("Failed to encode auth response: %v", err)
+	}
 }
