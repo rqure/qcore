@@ -168,7 +168,13 @@ func (me *connectionWorker) handleWebSocket(rw http.ResponseWriter, r *http.Requ
 
 	r = r.WithContext(me.handle.Ctx())
 
-	conn, err := websocket.Accept(rw, r, nil)
+	// Configure WebSocket options to allow any origin
+	wsOptions := &websocket.AcceptOptions{
+		// Allow all origins during development
+		InsecureSkipVerify: true,
+	}
+
+	conn, err := websocket.Accept(rw, r, wsOptions)
 	if err != nil {
 		qlog.Warn("Failed to upgrade connection: %v", err)
 		return
