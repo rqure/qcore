@@ -301,7 +301,7 @@ func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) 
 			}
 			return
 		}
-		if !session.IsValid() {
+		if !session.CheckIsValid(ctx) {
 			qlog.Warn("Invalid session")
 			rspCh <- AuthResponse{
 				Success: false,
