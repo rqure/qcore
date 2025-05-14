@@ -301,6 +301,14 @@ func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) 
 			}
 			return
 		}
+		if !session.IsValid() {
+			qlog.Warn("Invalid session")
+			rspCh <- AuthResponse{
+				Success: false,
+				Message: "Invalid session, supplied credentials are invalid or user does not exist",
+			}
+			return
+		}
 
 		rspCh <- AuthResponse{
 			Success:  true,
