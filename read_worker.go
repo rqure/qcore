@@ -363,9 +363,6 @@ func (me *readWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 
 	// Only handle READ requests
 	if req.RequestType != qprotobufs.ApiRuntimeDatabaseRequest_READ {
-		qlog.Warn("Only READ requests are supported")
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		me.sendResponse(args, rsp)
 		return
 	}
 
