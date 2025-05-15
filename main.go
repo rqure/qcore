@@ -11,6 +11,8 @@ func main() {
 	notificationManager := NewNotificationManager(store)
 	subjectManager := NewSubjectManager(store)
 
+	store.PublishNotifications().Connect(notificationManager.OnPublishNotifications)
+
 	initWorker := NewInitWorker(store)
 	storeWorker := qworkers.NewStore(store)
 	storeWorker.Connected().Connect(initWorker.OnConnected)

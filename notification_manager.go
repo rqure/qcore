@@ -17,7 +17,7 @@ import (
 )
 
 type NotificationManager interface {
-	PublishNotifications(args qdata.PublishNotificationArgs)
+	OnPublishNotifications(args qdata.PublishNotificationArgs)
 	Register(conn *websocket.Conn, authorizer qauthorization.Authorizer, cfg qdata.NotificationConfig)
 	Unregister(conn *websocket.Conn, cfg qdata.NotificationConfig)
 	AddConn(conn *websocket.Conn)
@@ -40,7 +40,7 @@ func NewNotificationManager(store qdata.StoreInteractor) NotificationManager {
 	}
 }
 
-func (me *notificationManager) PublishNotifications(args qdata.PublishNotificationArgs) {
+func (me *notificationManager) OnPublishNotifications(args qdata.PublishNotificationArgs) {
 	// Failed to read old value (it may not exist initially)
 	if !args.Prev.Success {
 		qlog.Trace("Failed to read old value: %v", args.Prev)
