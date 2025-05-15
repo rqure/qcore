@@ -254,9 +254,6 @@ func (me *writeWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 	}
 
 	if req.RequestType != qprotobufs.ApiRuntimeDatabaseRequest_WRITE {
-		qlog.Warn("Only WRITE requests are supported")
-		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
-		me.sendResponse(args, rsp)
 		return
 	}
 

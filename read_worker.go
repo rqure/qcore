@@ -390,6 +390,8 @@ func (me *readWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 		rsp.Response[i] = req.AsRequestPb()
 	}
 
+	qlog.Trace("Query response: %v", rsp.Response)
+
 	rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_SUCCESS
 	me.sendResponse(args, rsp)
 }
@@ -474,8 +476,8 @@ func (me *readWorker) handleQuery(args MessageReceivedArgs) {
 	}
 
 	rsp.NextCursor = pageResult.CursorId
-
 	rsp.Status = qprotobufs.ApiRuntimeQueryResponse_SUCCESS
+
 	me.sendResponse(args, rsp)
 }
 
