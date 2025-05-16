@@ -22,16 +22,18 @@ const DefaultAddr = ":7860"
 
 // AuthRequest represents credentials sent in authentication requests
 type AuthRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	RefreshToken string `json:"refreshToken,omitempty"`
 }
 
 // AuthResponse represents the response to an authentication request
 type AuthResponse struct {
-	Success  bool   `json:"success"`
-	Username string `json:"username,omitempty"`
-	Token    string `json:"token,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Success      bool   `json:"success"`
+	Username     string `json:"username,omitempty"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 type ClientConnectedArgs struct {
@@ -270,6 +272,49 @@ func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check for a refresh token
+	if authReq.RefreshToken != "" {
+		rspCh := make(chan AuthResponse, 1)
+		me.handle.DoInMainThread(func(ctx context.Context) {
+			clientProvider := qcontext.GetClientProvider[qauthentication.Client](ctx)
+			client := clientProvider.Client(ctx)
+			if client == nil {
+				qlog.Warn("Client not found")
+				rspCh <- AuthResponse{
+					Success: false,
+					Message: "Client not found",
+				}
+				return
+			}
+			session := client.RefreshTokenToSession(ctx, authReq.RefreshToken)
+			if session == nil || !session.CheckIsValid(ctx) {
+				qlog.Warn("Invalid session")
+				rspCh <- AuthResponse{
+					Success: false,
+					Message: "Invalid session",
+				}
+				return
+			}
+
+			rspCh <- AuthResponse{
+				Success:      true,
+				Username:     authReq.Username,
+				AccessToken:  session.AccessToken(),
+				RefreshToken: session.RefreshToken(),
+				Message:      "Authentication successful",
+			}
+		})
+		rsp := <-rspCh
+		if !rsp.Success {
+			sendAuthResponse(rw, rsp, http.StatusUnauthorized)
+			return
+		}
+
+		qlog.Info("User '%s' authenticated with refresh token", authReq.Username)
+		sendAuthResponse(rw, rsp, http.StatusOK)
+		return
+	}
+
 	// Validate required fields
 	if authReq.Username == "" || authReq.Password == "" {
 		sendAuthResponse(rw, AuthResponse{
@@ -311,10 +356,11 @@ func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) 
 		}
 
 		rspCh <- AuthResponse{
-			Success:  true,
-			Username: authReq.Username,
-			Token:    session.AccessToken(),
-			Message:  "Authentication successful",
+			Success:      true,
+			Username:     authReq.Username,
+			AccessToken:  session.AccessToken(),
+			RefreshToken: session.RefreshToken(),
+			Message:      "Authentication successful",
 		}
 	})
 
