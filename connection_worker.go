@@ -123,10 +123,10 @@ func (me *connectionWorker) Init(ctx context.Context) {
 
 	// Create a new HTTP server
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", me.handleWebSocket)
+	mux.HandleFunc("/core/", me.handleWebSocket)
 
 	// Register the auth handler
-	mux.HandleFunc("/auth", me.handleAuth)
+	mux.HandleFunc("/core/auth", me.handleAuth)
 
 	// Initialize the HTTP server
 	me.server = &http.Server{
