@@ -126,7 +126,7 @@ func (me *connectionWorker) Init(ctx context.Context) {
 	mux.HandleFunc("/core/", me.handleWebSocket)
 
 	// Register the auth handler
-	mux.HandleFunc("/core/auth", me.handleAuth)
+	mux.HandleFunc("/core/auth/", me.handleAuth)
 
 	// Initialize the HTTP server
 	me.server = &http.Server{
