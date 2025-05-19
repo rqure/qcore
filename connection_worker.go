@@ -288,11 +288,28 @@ func (me *connectionWorker) handleAuth(rw http.ResponseWriter, r *http.Request) 
 				return
 			}
 			session := client.RefreshTokenToSession(ctx, authReq.RefreshToken)
-			if session == nil || !session.CheckIsValid(ctx) {
+			if session == nil {
 				qlog.Warn("Invalid session")
 				rspCh <- AuthResponse{
 					Success: false,
 					Message: "Invalid session",
+				}
+				return
+			}
+			err := session.Refresh(ctx)
+			if err != nil {
+				qlog.Warn("Failed to refresh session: %v", err)
+				rspCh <- AuthResponse{
+					Success: false,
+					Message: "Failed to refresh session",
+				}
+				return
+			}
+			if !session.CheckIsValid(ctx) {
+				qlog.Warn("Invalid session")
+				rspCh <- AuthResponse{
+					Success: false,
+					Message: "Invalid session, supplied credentials are invalid or user does not exist",
 				}
 				return
 			}
