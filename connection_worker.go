@@ -192,6 +192,7 @@ func (me *connectionWorker) handleWebSocket(rw http.ResponseWriter, r *http.Requ
 
 		if err != nil {
 			if strings.Contains(err.Error(), "EOF") {
+				qlog.Trace("Client closed connection: %s", r.RemoteAddr)
 				break
 			}
 
