@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -24,8 +25,11 @@ type ReadWorker interface {
 }
 
 type readWorker struct {
-	store          *qdata.Store
-	isReady        bool
+	store *qdata.Store
+
+	isReady bool
+	readyMu *sync.RWMutex
+
 	handle         qcontext.Handle
 	subjectManager SubjectManager
 }
@@ -34,6 +38,8 @@ func NewReadWorker(store *qdata.Store, subjectManager SubjectManager) ReadWorker
 	return &readWorker{
 		store:          store,
 		subjectManager: subjectManager,
+		isReady:        false,
+		readyMu:        &sync.RWMutex{},
 	}
 }
 
@@ -102,6 +108,13 @@ func (me *readWorker) handleGetEntityTypes(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeGetEntityTypesResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+
 	// Apply default page size if not specified
 	pageSize := req.PageSize
 	if pageSize <= 0 {
@@ -152,6 +165,13 @@ func (me *readWorker) handleGetEntitySchema(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiConfigGetEntitySchemaResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+
 	schema, err := me.store.GetEntitySchema(ctx, qdata.EntityType(req.Type))
 	if err != nil {
 		qlog.Warn("Could not get entity schema: %v", err)
@@ -185,7 +205,13 @@ func (me *readWorker) handleGetRoot(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
-	iter, err := me.store.FindEntities("Root")
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		me.sendResponse(args, rsp)
+		return
+	}
+
+	iter, err := me.store.FindEntities(qdata.ETRoot)
 	if err != nil {
 		qlog.Warn("Could not find root entity: %v", err)
 		me.sendResponse(args, rsp)
@@ -220,6 +246,13 @@ func (me *readWorker) handleGetEntities(args MessageReceivedArgs) {
 		return
 	}
 	ctx = authCtx
+
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeFindEntitiesResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
 
 	// Apply default page size if not specified
 	pageSize := req.PageSize
@@ -279,6 +312,13 @@ func (me *readWorker) handleFieldExists(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeFieldExistsResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+
 	exists, err := me.store.FieldExists(
 		ctx,
 		qdata.EntityType(req.EntityType),
@@ -316,6 +356,13 @@ func (me *readWorker) handleEntityExists(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeEntityExistsResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+
 	exists, err := me.store.EntityExists(ctx, qdata.EntityId(req.EntityId))
 	if err != nil {
 		qlog.Warn("Could not check entity existence: %v", err)
@@ -342,7 +389,7 @@ func (me *readWorker) handleGetDatabaseConnectionStatus(args MessageReceivedArgs
 	}
 
 	// Connection status can be checked without authentication
-	if me.isReady {
+	if me.IsReady() {
 		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_CONNECTED
 	} else {
 		rsp.Status = qprotobufs.ApiRuntimeGetDatabaseConnectionStatusResponse_DISCONNECTED
@@ -384,6 +431,13 @@ func (me *readWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
+	if !me.IsReady() {
+		qlog.Warn("Could not handle request %v. Database is not connected.", req)
+		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
+		me.sendResponse(args, rsp)
+		return
+	}
+
 	me.store.Read(ctx, reqs...)
 
 	for i, req := range reqs {
@@ -416,7 +470,7 @@ func (me *readWorker) handleQuery(args MessageReceivedArgs) {
 	}
 	ctx = authCtx
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle query request. Database is not connected.")
 		rsp.Status = qprotobufs.ApiRuntimeQueryResponse_FAILURE
 		me.sendResponse(args, rsp)
@@ -503,9 +557,19 @@ func (me *readWorker) sendResponse(args MessageReceivedArgs, response proto.Mess
 }
 
 func (me *readWorker) OnReady(ctx context.Context) {
+	me.readyMu.Lock()
+	defer me.readyMu.Unlock()
 	me.isReady = true
 }
 
 func (me *readWorker) OnNotReady(context.Context) {
+	me.readyMu.Lock()
+	defer me.readyMu.Unlock()
 	me.isReady = false
+}
+
+func (me *readWorker) IsReady() bool {
+	me.readyMu.RLock()
+	defer me.readyMu.RUnlock()
+	return me.isReady
 }

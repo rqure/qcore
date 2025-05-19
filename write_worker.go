@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -23,8 +24,10 @@ type WriteWorker interface {
 }
 
 type writeWorker struct {
-	store   *qdata.Store
+	store *qdata.Store
+
 	isReady bool
+	readyMu *sync.RWMutex
 
 	handle         qcontext.Handle
 	subjectManager SubjectManager
@@ -34,17 +37,29 @@ func NewWriteWorker(store *qdata.Store, subjectManager SubjectManager) WriteWork
 	return &writeWorker{
 		store:          store,
 		subjectManager: subjectManager,
+		isReady:        false,
+		readyMu:        &sync.RWMutex{},
 	}
 }
 
 func (me *writeWorker) Deinit(context.Context) {}
 func (me *writeWorker) DoWork(context.Context) {}
 func (me *writeWorker) OnReady(ctx context.Context) {
+	me.readyMu.Lock()
+	defer me.readyMu.Unlock()
 	me.isReady = true
 }
 
 func (me *writeWorker) OnNotReady(context.Context) {
+	me.readyMu.Lock()
+	defer me.readyMu.Unlock()
 	me.isReady = false
+}
+
+func (me *writeWorker) IsReady() bool {
+	me.readyMu.RLock()
+	defer me.readyMu.RUnlock()
+	return me.isReady
 }
 
 func (me *writeWorker) Init(ctx context.Context) {
@@ -88,7 +103,7 @@ func (me *writeWorker) handleCreateEntity(args MessageReceivedArgs) {
 		return
 	}
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigCreateEntityResponse_FAILURE
 		me.sendResponse(args, rsp)
@@ -132,7 +147,7 @@ func (me *writeWorker) handleDeleteEntity(args MessageReceivedArgs) {
 		return
 	}
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigDeleteEntityResponse_FAILURE
 		me.sendResponse(args, rsp)
@@ -170,7 +185,7 @@ func (me *writeWorker) handleSetEntitySchema(args MessageReceivedArgs) {
 		return
 	}
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigSetEntitySchemaResponse_FAILURE
 		me.sendResponse(args, rsp)
@@ -208,7 +223,7 @@ func (me *writeWorker) handleRestoreSnapshot(args MessageReceivedArgs) {
 		return
 	}
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiConfigRestoreSnapshotResponse_FAILURE
 		me.sendResponse(args, rsp)
@@ -246,7 +261,7 @@ func (me *writeWorker) handleDatabaseRequest(args MessageReceivedArgs) {
 		return
 	}
 
-	if !me.isReady {
+	if !me.IsReady() {
 		qlog.Warn("Could not handle request %v. Database is not connected.", req)
 		rsp.Status = qprotobufs.ApiRuntimeDatabaseResponse_FAILURE
 		me.sendResponse(args, rsp)
