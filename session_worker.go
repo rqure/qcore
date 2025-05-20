@@ -144,6 +144,10 @@ func (me *sessionWorker) DoWork(ctx context.Context) {
 }
 
 func (me *sessionWorker) performInit(ctx context.Context) {
+	if !me.isReady {
+		return
+	}
+
 	qlog.Info("Ensuring setup of auth database...")
 	err := me.admin.EnsureSetup(ctx)
 	if err != nil {
