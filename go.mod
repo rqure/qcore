@@ -6,7 +6,7 @@ require (
 	github.com/coder/websocket v1.8.13
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/rqure/qlib v0.1.143
+	github.com/rqure/qlib v0.1.145
 	google.golang.org/protobuf v1.36.6
 )
 
