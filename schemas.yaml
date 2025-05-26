@@ -1,12 +1,29 @@
+defaultFields:
+  - name: Name
+    type: String
+    rank: 1
+  - name: Description
+    type: String
+    rank: 2
+  - name: Parent
+    type: EntityReference
+    rank: 3
+  - name: Children
+    type: EntityList
+    rank: 4
+
 entitySchemas:
   - name: Root
     fields:
       - name: SchemaChanged
         type: String
+        rank: 5
       - name: EntityCreated
         type: EntityReference
+        rank: 6
       - name: EntityDeleted
         type: EntityReference
+        rank: 7
   
   - name: Folder
     fields: []
@@ -16,6 +33,8 @@ entitySchemas:
       - name: Policy
         type: String
         rank: 5
+        writePermissions:
+          - Kernel
   
   - name: AreaOfResponsibility
     fields: []
@@ -157,7 +176,7 @@ initialEntities:
                   - name: Roles
                     value: Admin
                   - name: SourceOfTruth
-                    value: QOS
+                    value: 0 # QOS
           - type: Folder
             path: Clients
             children:
@@ -169,12 +188,3 @@ initialEntities:
                 path: qfind
               - type: Client
                 path: qcore
-
-schemaUpdates:
-  - name: Permission
-    fields:
-      - name: Policy
-        type: String
-        rank: 5
-        writePermissions:
-          - Kernel
