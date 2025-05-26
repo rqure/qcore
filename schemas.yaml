@@ -1,0 +1,180 @@
+entitySchemas:
+  - name: Root
+    fields:
+      - name: SchemaChanged
+        type: String
+      - name: EntityCreated
+        type: EntityReference
+      - name: EntityDeleted
+        type: EntityReference
+  
+  - name: Folder
+    fields: []
+  
+  - name: Permission
+    fields:
+      - name: Policy
+        type: String
+        rank: 5
+  
+  - name: AreaOfResponsibility
+    fields: []
+  
+  - name: Role
+    fields: []
+  
+  - name: User
+    fields:
+      - name: Roles
+        type: EntityList
+        rank: 5
+      - name: AreasOfResponsibilities
+        type: EntityList
+        rank: 6
+      - name: SourceOfTruth
+        type: Choice
+        choiceOptions:
+          - QOS
+          - Keycloak
+        rank: 7
+      - name: KeycloakId
+        type: String
+        rank: 8
+      - name: Email
+        type: String
+        rank: 9
+      - name: FirstName
+        type: String
+        rank: 10
+      - name: LastName
+        type: String
+        rank: 11
+      - name: IsEmailVerified
+        type: Bool
+        rank: 12
+      - name: IsEnabled
+        type: Bool
+        rank: 13
+      - name: JSON
+        type: String
+        rank: 14
+  
+  - name: Client
+    fields:
+      - name: LogLevel
+        type: Choice
+        choiceOptions:
+          - Trace
+          - Debug
+          - Info
+          - Warn
+          - Error
+          - Panic
+        rank: 5
+      - name: QLibLogLevel
+        type: Choice
+        choiceOptions:
+          - Trace
+          - Debug
+          - Info
+          - Warn
+          - Error
+          - Panic
+        rank: 6
+      - name: ReadsPerSecond
+        type: Int
+        rank: 7
+      - name: WritesPerSecond
+        type: Int
+        rank: 8
+      - name: IdleMsPerSecond
+        type: Int
+        rank: 9
+
+  - name: SessionController
+    fields:
+      - name: LastEventTime
+        type: Timestamp
+        rank: 5
+      - name: Logout
+        type: EntityReference
+        rank: 6
+
+initialEntities:
+  - type: Root
+    path: Root
+    children:
+      - type: Folder
+        path: Security Models
+        children:
+          - type: Folder
+            path: Permissions
+            children:
+              - type: Permission
+                path: Kernel
+                fields:
+                  - name: Policy
+                    value: |
+                      contains := func(l, v) {
+                        for i in l {
+                          if i == v {
+                            return true
+                          }
+                        }
+                        return false
+                      }
+
+                      ALLOW := false
+                      if contains(["Client"], SUBJECT.entityType()) {
+                        STORE.read(
+                          SUBJECT.field("Name").asReadRequest())
+                        
+                        name := SUBJECT.field("Name").value.getString()
+                        ALLOW = contains(["qinitdb", "qsql", "qcore"], name)
+                      } else if contains(["User"], SUBJECT.entityType()) {
+                         SUBJECT.read(
+                          SUBJECT.field("Name").asReadRequest())
+                        
+                        name := SUBJECT.field("Name").value.getString()
+                        ALLOW = contains(["qei"], name)
+                      }
+          - type: Folder
+            path: Areas of Responsibility
+            children:
+              - type: AreaOfResponsibility
+                path: System
+          - type: Folder
+            path: Roles
+            children:
+              - type: Role
+                path: Admin
+          - type: Folder
+            path: Users
+            children:
+              - type: User
+                path: qei
+                fields:
+                  - name: Roles
+                    value: Admin
+                  - name: SourceOfTruth
+                    value: QOS
+          - type: Folder
+            path: Clients
+            children:
+              - type: Client
+                path: qinitdb
+              - type: Client
+                path: qsql
+              - type: Client
+                path: qfind
+              - type: Client
+                path: qcore
+
+schemaUpdates:
+  - name: Permission
+    fields:
+      - name: Policy
+        type: String
+        rank: 5
+        writePermissions:
+          - Kernel

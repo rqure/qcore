@@ -1,0 +1,13 @@
+defaultFields:
+  - name: Name
+    type: String
+    rank: 0
+  - name: Description
+    type: String
+    rank: 1
+  - name: Parent
+    type: EntityReference
+    rank: 2
+  - name: Children
+    type: EntityList
+    rank: 3
