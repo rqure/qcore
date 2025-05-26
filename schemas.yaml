@@ -119,6 +119,35 @@ entitySchemas:
         type: EntityReference
         rank: 6
 
+  - name: UIModel
+    fields:
+      - name: ConfigurationFile
+        type: String
+        rank: 5
+
+  - name: Task
+    fields:
+      - name: ExecuteTrigger
+        type: Choice
+        choiceOptions:
+          - Execute
+        rank: 5
+      - name: CronExpression
+        type: String
+        rank: 6
+      - name: NotifyOnEntity
+        type: EntityReference
+        rank: 7
+      - name: NotifyOnEntityType
+        type: String
+        rank: 8
+      - name: NotifyOnFieldType
+        type: String
+        rank: 9
+      - name: LastRun
+        type: Timestamp
+        rank: 10
+
 initialEntities:
   - type: Root
     path: Root
@@ -188,3 +217,5 @@ initialEntities:
                 path: qfind
               - type: Client
                 path: qcore
+      - type: Folder
+        path: UI Models
