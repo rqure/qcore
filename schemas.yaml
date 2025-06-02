@@ -147,6 +147,15 @@ entitySchemas:
       - name: LastRun
         type: Timestamp
         rank: 10
+      - name: Enabled
+        type: Bool
+        rank: 11
+      - name: ConfigurationStatus
+        type: Choice
+        choiceOptions:
+          - Invalid
+          - Valid
+        rank: 12
 
 initialEntities:
   - type: Root
